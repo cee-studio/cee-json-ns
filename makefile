@@ -1,6 +1,6 @@
 JSON_SRC=value.cpp parser.cpp snprint.cpp tokenizer.cpp
 JSON_HDR=json.hpp tokenizer.hpp utf8.h
-CXXFLAGS = -fno-rtti -Wno-write-strings
+CXXFLAGS = -fno-rtti -fno-exceptions -Wno-write-strings
 
 HEADERS=stdlib.h string.h errno.h sys/types.h sys/stat.h unistd.h stdio.h
 
