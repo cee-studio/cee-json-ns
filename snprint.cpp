@@ -3,7 +3,7 @@
      Artyom Beilis (Tonkikh) <artyomtnk@yahoo.com>'s orca_json.cpp
 */
 #ifndef CEE_JSON_AMALGAMATION
-#include "json.h"
+#include "json.hpp"
 #include <string.h>
 #endif
 
@@ -247,9 +247,9 @@ size_t snprint (char * buf, size_t size, json::data * j, enum format f) {
       case type_is_number:
         {
           pad(&offset, buf, ccnt, f);
-          incr = box::snprint(NULL, 0, to_number(cur_orca_json));
+          incr = boxed::snprint(NULL, 0, to_number(cur_orca_json));
           if (buf) {
-            box::snprint(buf+offset, incr, to_number(cur_orca_json));
+            boxed::snprint(buf+offset, incr, to_number(cur_orca_json));
           }
           offset+=incr;
           if (ccnt->more_siblings)

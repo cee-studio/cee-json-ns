@@ -1,6 +1,6 @@
 #ifndef CEE_JSON_TOKENIZER_H
 #define CEE_JSON_TOKENIZER_H
-#include "cee.h"
+#include "cee.hpp"
 
 namespace cee {
   namespace json {

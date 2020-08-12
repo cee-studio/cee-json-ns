@@ -3,9 +3,9 @@
      Artyom Beilis (Tonkikh) <artyomtnk@yahoo.com>'s orca_json.cpp
 */
 #ifndef CEE_JSON_AMALGAMATION
-#include "json.h"
-#include "cee.h"
-#include "tokenizer.h"
+#include "json.hpp"
+#include "cee.hpp"
+#include "tokenizer.hpp"
 #include <string.h>
 #include <stdlib.h>
 #endif
@@ -26,9 +26,7 @@ enum state_type {
   st_done
 } state_type;
 
-
-static const uintptr_t orca_json_max_depth = 512;
-
+static const uintptr_t json_max_depth = 512;
 
 bool parse(char * buf, uintptr_t len, json::data **out, bool force_eof, 
            int *error_at_line)
@@ -41,11 +39,12 @@ bool parse(char * buf, uintptr_t len, json::data **out, bool force_eof,
   enum state_type state = st_init;
   str::data * key = NULL;
   
-  stack::data * sp = stack::mk_e(dp_noop, orca_json_max_depth);
+  stack::data * sp = stack::mk_e (dp_noop, json_max_depth);
   tuple::data * top = NULL;
   tuple::data * result = NULL;
+  static enum del_policy del_noops[2] = { dp_noop, dp_noop };
 
-#define SPI(st, j)   tuple::mk_e((enum cee::del_policy [2]){cee::dp_noop, cee::dp_noop}, (void *)st, j)
+#define SPI(st, j)   tuple::mk_e(del_noops, (void *)st, j)
 #define TOPS         (static_cast<enum state_type>(reinterpret_cast<intptr_t>(top->_[0])))
 #define POP(sp)      { result = (struct tuple::data *)stack::pop(sp); }
   

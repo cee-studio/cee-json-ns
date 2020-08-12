@@ -1,5 +1,6 @@
-JSON_SRC=value.cc parser.cc snprint.cc tokenizer.cc
-JSON_HDR=json.h tokenizer.h utf8.h
+JSON_SRC=value.cpp parser.cpp snprint.cpp tokenizer.cpp
+JSON_HDR=json.hpp tokenizer.hpp utf8.h
+CXXFLAGS = -fno-rtti -Wno-write-strings
 
 HEADERS=stdlib.h string.h errno.h sys/types.h sys/stat.h unistd.h stdio.h
 
@@ -8,12 +9,12 @@ define json_amalgamation
 	@echo "#define CEE_JSON_ONE" >> $(1)
 	@echo "#define _GNU_SOURCE" >> $(1)
 	@for ii in $(HEADERS); do echo '#include <'$$ii'>' >> $(1); done
-	@echo "#include \"cee.h\"" >> $(1)
+	@echo "#include \"cee.hpp\"" >> $(1)
 	@echo " " >> $(1)
 	@for ii in $(JSON_HDR); do cat $$ii >> $(1); echo " " >> $(1); done
-	@echo "#define CEE_JSON_AMALGAMATION" > tmp.c
-	@for ii in $(JSON_SRC); do echo '#include "'$$ii'"' >> tmp.cc; done
-	$(CXX) -E $(2) -nostdinc tmp.cc >> $(1)
+	@echo "#define CEE_JSON_AMALGAMATION" > tmp.cpp
+	@for ii in $(JSON_SRC); do echo '#include "'$$ii'"' >> tmp.cpp; done
+	$(CXX) -E -CC $(2) -nostdinc tmp.cpp >> $(1)
 	@echo "#endif" >> $(1)
 endef
 
@@ -21,26 +22,26 @@ endef
 
 all: tester
 
-json-one.c: $(JSON_SRC) cee.h
-	$(call json_amalgamation, json-one.cc)
+json-one.cpp: $(JSON_SRC) cee.hpp
+	$(call json_amalgamation, json-one.cpp)
 
-json-one.o: json-one.cc cee.h
-	$(CXX) -c json-one.cc
+json-one.o: json-one.cpp cee.hpp
+	$(CXX) -c $(CXXFLAGS) json-one.cpp
 
-cee.o: cee.cc cee.h
-	$(CXX) -c -g cee.cc
+cee.o: cee.cpp cee.hpp
+	$(CXX) -c $(CXXFLAGSS) -g cee.cpp
 
 release: $(JSON_SRC)
-	$(call json_amalgamation, json.cc, -P)
+	$(call json_amalgamation, json.cpp, -P)
 	@mkdir -p release
-	@mv json.cc release
-	@cp json.h release
+	@mv json.cpp release
+	@cp json.hpp release
 
 tester: json-one.o cee.o
-	$(CXX)  -static -g tester.cc json-one.o cee.o
+	$(CXX)  -static -g tester.cpp json-one.o cee.o
 
 clean:
-	rm -f a.cc cee.o json-one.c json-one.o tmp.cc
+	rm -f cee.o json-one.cpp json-one.o tmp.cpp
 
 distclean: clean
-	rm -f cee.cc cee.h
+	rm -f cee.cpp cee.hpp

@@ -177,7 +177,6 @@ namespace str {
 };
   
 namespace vect {
-
   struct data {
     void * _[1]; // an array of `void *`s
   };
@@ -411,20 +410,20 @@ namespace singleton {
 }
   
   
-enum primitive_type {
-  primitive_f64 = 1,
-  primitive_f32,
-  primitive_u64,
-  primitive_u32,
-  primitive_u16,
-  primitive_u8,
-  primitive_i64,
-  primitive_i32,
-  primitive_i16,
-  primitive_i8
-};
-
-union primitive_value {
+namespace boxed {
+  enum primitive_type {
+    primitive_f64 = 1,
+    primitive_f32,
+    primitive_u64,
+    primitive_u32,
+    primitive_u16,
+    primitive_u8,
+    primitive_i64,
+    primitive_i32,
+    primitive_i16,
+    primitive_i8
+  };
+  union primitive_value {
     double   f64;
     float    f32;
     uint64_t u64;
@@ -435,9 +434,8 @@ union primitive_value {
     int32_t  i32;
     int16_t  i16;
     int8_t   i8;
-};
+  };
 
-namespace box {
   /*
    * boxed primitive value
    */
@@ -445,68 +443,74 @@ namespace box {
     union primitive_value _;
   };
 
-  extern box::data * from_double(double);
-  extern box::data * from_float(float);
+  extern boxed::data * from_double(double);
+  extern boxed::data * from_float(float);
 
-  extern box::data * from_u64(uint64_t);
-  extern box::data * from_u32(uint32_t);
-  extern box::data * from_u16(uint16_t);
-  extern box::data * from_u8(uint8_t);
+  extern boxed::data * from_u64(uint64_t);
+  extern boxed::data * from_u32(uint32_t);
+  extern boxed::data * from_u16(uint16_t);
+  extern boxed::data * from_u8(uint8_t);
 
-  extern box::data * from_i64(int64_t);
-  extern box::data * from_i32(int32_t);
-  extern box::data * from_i16(int16_t);
-  extern box::data * from_i8(int8_t);
+  extern boxed::data * from_i64(int64_t);
+  extern boxed::data * from_i32(int32_t);
+  extern boxed::data * from_i16(int16_t);
+  extern boxed::data * from_i8(int8_t);
 
-  extern double as_double(box::data * x);
-  extern float as_float(box::data * x);
-  extern uint64_t as_u64(box::data * x);
-  extern uint32_t as_u32(box::data * x);
-  extern uint16_t as_u16(box::data * x);
-  extern uint8_t  as_u8(box::data * x);
+  extern double   to_double(boxed::data * x);
+  extern float    to_float(boxed::data * x);
+  
+  extern uint64_t to_u64(boxed::data * x);
+  extern uint32_t to_u32(boxed::data * x);
+  extern uint16_t to_u16(boxed::data * x);
+  extern uint8_t  to_u8(boxed::data * x);
 
-  extern int64_t as_i64(box::data * x);
-  extern int32_t as_i32(box::data * x);
-  extern int16_t as_i16(box::data * x);
-  extern int8_t  as_i8(box::data * x);
+  extern int64_t  to_i64(boxed::data * x);
+  extern int32_t  to_i32(boxed::data * x);
+  extern int16_t  to_i16(boxed::data * x);
+  extern int8_t   to_i8(boxed::data * x);
 
   /*
    * number of bytes needed to print out the value
    */
-  extern size_t snprint(char * buf, size_t size, box::data *p);
-};
-
-union ptr {
-  void * _;
-  str::data       * str;
-  set::data       * set;
-  vect::data      * vect;
-  map::data       * map;
-  dict::data      * dict;
-  tuple::data     * tuple;
-  triple::data    * triple;
-  quadruple::data * quadruple;
-  block::data     * block;
-  box::data       * box;
-  singleton::data * singleton;
-  stack::data     * stack;
+  extern size_t snprint(char * buf, size_t size, boxed::data *p);
 };
   
 namespace tagged {
-/*
- * tagged value is useful to construct tagged union
- */
-struct data {
-  tag_t tag;
-  union ptr ptr;
-};
+  struct data;
+  
+  union ptr {
+    void * _;
+    str::data       * str;
+    set::data       * set;
+    vect::data      * vect;
+    map::data       * map;
+    dict::data      * dict;
+    tuple::data     * tuple;
+    triple::data    * triple;
+    quadruple::data * quadruple;
+    block::data     * block;
+    boxed::data     * boxed;
+    singleton::data * singleton;
+    stack::data     * stack;
+    tagged::data    * tagged;
+  };
+  
+  
+  /*
+   * the generic tagged value is useful to construct tagged union
+   * runtime checking is needed. 
+   */
+  struct data {
+    tag_t tag;
+    union ptr ptr;
+  };
 
-/*
- * tag: any integer value
- * v: a value 
- */
-extern tagged::data * mk (uintptr_t tag, void * v);
-extern tagged::data * mk_e (enum del_policy o, uintptr_t tag, void *v);
+  /*
+   * tag: any integer value
+   * v: a pointer
+   */
+  extern tagged::data * mk (uintptr_t tag, void * v);
+  extern tagged::data * mk_e (enum del_policy o, uintptr_t tag, void *v);
 }
 
 namespace closure {

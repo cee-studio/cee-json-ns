@@ -1,9 +1,9 @@
 #ifndef CEE_JSON_AMALGAMATION
-#include "cee.h"
-#include "json.h"
+#include "cee.hpp"
+#include "json.hpp"
 #include "utf8.h"
 #include <stdlib.h>
-#include "tokenizer.h"
+#include "tokenizer.hpp"
 #endif
 
 namespace cee {

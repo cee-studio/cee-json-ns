@@ -1,7 +1,7 @@
 #ifndef CEE_JSON_AMALGAMATION
-#include "json.h"
+#include "json.hpp"
 #include <stdlib.h>
-#include "cee.h"
+#include "cee.hpp"
 #include <string.h>
 #include <errno.h>
 #include <sys/types.h>
@@ -14,12 +14,12 @@ namespace cee {
 
 json::data * mk_true () {
   static char b[CEE_SINGLETON_SIZE];
-  return (json::data *) singleton::init ((uintptr_t)type_is_boolean, b);
+  return (data *) singleton::init ((uintptr_t)type_is_boolean, b);
 }
 
 json::data * mk_false () {
   static char b[CEE_SINGLETON_SIZE];
-  return (json::data *) singleton::init ((uintptr_t)type_is_boolean, b);
+  return (data *) singleton::init ((uintptr_t)type_is_boolean, b);
 }
 
 json::data * mk_bool(bool b) {
@@ -31,12 +31,12 @@ json::data * mk_bool(bool b) {
 
 json::data * mk_undefined () {
   static char b[CEE_SINGLETON_SIZE];
-  return (json::data *) singleton::init ((uintptr_t)type_is_undefined, b);
+  return (data *) singleton::init ((uintptr_t)type_is_undefined, b);
 }
 
 json::data * mk_null () {
   static char b[CEE_SINGLETON_SIZE];
-  return (json::data *) singleton::init ((uintptr_t)type_is_null, b);
+  return (data *) singleton::init ((uintptr_t)type_is_null, b);
 }
 
 map::data * to_object (json::data * p) {
@@ -60,7 +60,7 @@ str::data * to_string (json::data * p) {
   return NULL;
 }
 
-box::data * to_number (json::data * p) {
+boxed::data * to_number (json::data * p) {
   if (p->t  == type_is_number) {
     return p->value.number;
   }
@@ -78,26 +78,26 @@ bool to_bool (json::data * p) {
 }
 
 json::data * mk_number (double d) {
-  box::data *p = box::from_double (d);
+  boxed::data *p = boxed::from_double (d);
   tagged::data * t = tagged::mk (type_is_number, p);
-  return (json::data *)t;
+  return (data *)t;
 }
 
 json::data * mk_string(str::data *s) {
   tagged::data * t = tagged::mk(type_is_string, s);
-  return (json::data *)t;
+  return (data *)t;
 }
 
 json::data * mk_array(int s) {
   vect::data * v = vect::mk(s);
   tagged::data * t = tagged::mk(type_is_array, v);
-  return (json::data *)t;
+  return (data *)t;
 }
     
 json::data * mk_object() {
   map::data * m = map::mk ((cmp_fun)strcmp);
   tagged::data * t = tagged::mk(type_is_object, m);
-  return (json::data *)t;
+  return (data *)t;
 }
 
 void object_set(json::data * j, char * key, json::data * v) {

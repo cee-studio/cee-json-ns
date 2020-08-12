@@ -1,7 +1,7 @@
 #ifndef CEE_JSON_H
 #define CEE_JSON_H
 #ifndef CEE_JSON_AMALGAMATION
-#include "cee.h"
+#include "cee.hpp"
 #include <stdbool.h>
 #include <stdio.h>
 #include <stdint.h>
@@ -31,7 +31,7 @@ struct data {
     singleton::data * null;
     singleton::data * undefined;
     singleton::data * boolean;
-    box::data       * number;
+    boxed::data     * number;
     str::data       * string;
     vect::data      * array;
     map::data       * object;
@@ -56,10 +56,10 @@ extern json::data * load_from_file (FILE *, bool force_eof, int * error_at_line)
 extern json::data * load_from_buffer (int size, char *, int line);
 extern int cmp (json::data *, json::data *);
 
-extern vect::data * to_array (json::data *);
-extern map::data * to_object (json::data *);
-extern box::data * to_number (json::data *);
-extern str::data * to_string (json::data *);
+extern vect::data  * to_array (json::data *);
+extern map::data   * to_object (json::data *);
+extern boxed::data * to_number (json::data *);
+extern str::data   * to_string (json::data *);
 
 extern json::data * mk_true();
 extern json::data * mk_false();
@@ -84,7 +84,7 @@ extern size_t snprint (char * buf, size_t size, json::data *, enum format);
 
 extern bool parse(char * buf, uintptr_t len, json::data **out, bool force_eof,
                   int *error_at_line);
-    
+
   }
 }
 
