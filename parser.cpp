@@ -180,26 +180,26 @@ bool parse(char * buf, uintptr_t len, json::data **out, bool force_eof,
           POP(sp);
           break;
         }
-        struct vect::data * ar = json::to_array((json::data *)top->_[1]);
+        struct array::data * ar = json::to_array((json::data *)top->_[1]);
         
         if(c==tock_str)  {
-          vect::append(ar, mk_string(tock.str));
+          array::append(ar, mk_string(tock.str));
           state=st_array_close_or_comma_expected;
         } 
         else if(c==tock_true) {
-          vect::append(ar, mk_true());
+          array::append(ar, mk_true());
           state=st_array_close_or_comma_expected;
         } 
         else if(c==tock_false) {
-          vect::append(ar, mk_false());
+          array::append(ar, mk_false());
           state=st_array_close_or_comma_expected;
         } 
         else if(c==tock_null) {
-          vect::append(ar, mk_null());
+          array::append(ar, mk_null());
           state=st_array_close_or_comma_expected;
         } 
         else if(c==tock_number) {
-          vect::append(ar, mk_number(tock.real));
+          array::append(ar, mk_number(tock.real));
           state=st_array_close_or_comma_expected;
         } 
         else if(c=='[') {

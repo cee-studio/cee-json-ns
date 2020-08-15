@@ -176,48 +176,52 @@ namespace str {
   extern str::data * ncat (str::data *, char * s, size_t);
 };
   
-namespace vect {
+/* an auto expandable array */
+namespace array {
   struct data {
     void * _[1]; // an array of `void *`s
   };
 
   /*
-   * size: the initial size of the vector
-   * when the vector is deleted, its elements will not be deleted
+   * size: the initial size of the array
+   * when the array is deleted, its elements will be handled by 
+   * the default deletion policy
    */
-  extern vect::data * mk (size_t size);
+  extern array::data * mk (size_t size);
 
-
-
-  extern vect::data * mk_e (enum del_policy o, size_t size);
 
   /*
-   * it may return a new vector if the parameter vector is too small
+   *
    */
-  extern vect::data * append(vect::data * v, void * e);
+  extern array::data * mk_e (enum del_policy o, size_t size);
+
+  /*
+   * it may return a new array if the parameter array is too small
+   */
+  extern array::data * append(array::data * v, void * e);
 
 
   /*
    * it inserts an element e at index and shift the rest elements 
    * to higher indices
    */
-  extern vect::data * insert(vect::data * v, size_t index, void * e);
+  extern array::data * insert(array::data * v, size_t index, void * e);
 
   /*
    * it removes an element at index and shift the rest elements 
    * to lower indices
    */
-  extern vect::data * remove(vect::data * v, size_t index);
+  extern array::data * remove(array::data * v, size_t index);
 
   /*
-   * returns the number of elements in the vector
+   * returns the number of elements in the array
    */
-  extern size_t size(vect::data *);
+  extern size_t size(array::data *);
 
   /*
    *
    */
-  extern size_t capacity (vect::data *);
+  extern size_t capacity (array::data *);
 };
 
   
@@ -306,7 +310,7 @@ namespace set {
   extern void clear (set::data * m);
   extern size_t size(set::data * m);
   extern bool empty(set::data * s);
-  extern vect::data * values(set::data * m);
+  extern array::data * values(set::data * m);
   extern set::data * union_sets (set::data * s1, set::data * s2);
 }
 
@@ -326,8 +330,8 @@ namespace map {
   extern void add(map::data * m, void * key, void * value);
   extern void * find(map::data * m, void * key);
   extern void * remove(map::data *m, void * key);
-  extern vect::data * keys(map::data *m);
-  extern vect::data * values(map::data *m);
+  extern array::data * keys(map::data *m);
+  extern array::data * values(map::data *m);
 };
 
 
@@ -482,7 +486,7 @@ namespace tagged {
     void * _;
     str::data       * str;
     set::data       * set;
-    vect::data      * vect;
+    array::data     * array;
     map::data       * map;
     dict::data      * dict;
     tuple::data     * tuple;
