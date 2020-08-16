@@ -12,7 +12,7 @@ namespace cee {
 
 struct counter {
   uintptr_t next;
-  array::data * array;
+  list::data * array;
   map::data  * object;
   char tabs;
   char more_siblings;
@@ -263,7 +263,7 @@ size_t snprint (char * buf, size_t size, json::data * j, enum format f) {
           if (i == 0) 
             delimiter(&offset, buf, f, ccnt, '[');
           
-          uintptr_t n = array::size(ccnt->array);
+          uintptr_t n = list::size(ccnt->array);
           if (i < n) {
             bool more_siblings = false;
             if (1 < n && i+1 < n)
@@ -285,7 +285,7 @@ size_t snprint (char * buf, size_t size, json::data * j, enum format f) {
           if (i == 0)
             delimiter(&offset, buf, f, ccnt, '{');
           
-          uintptr_t n = array::size(ccnt->array);
+          uintptr_t n = list::size(ccnt->array);
           if (i < n) {
             bool more_siblings = false;
             if (1 < n && i+1 < n)

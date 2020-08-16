@@ -45,8 +45,8 @@ map::data * to_object (json::data * p) {
   }
   return NULL;
 }
-    
-array::data * to_array (json::data * p) {
+
+list::data * to_array (json::data * p) {
   if (p->t == type_is_array) {
     return p->value.array;
   }
@@ -89,7 +89,7 @@ json::data * mk_string(str::data *s) {
 }
 
 json::data * mk_array(int s) {
-  array::data * v = array::mk(s);
+  list::data * v = list::mk(s);
   tagged::data * t = tagged::mk(type_is_array, v);
   return (data *)t;
 }
@@ -129,24 +129,24 @@ void object_set_number (json::data * j, char * key, double real) {
 }
 
 void array_append (json::data * j, json::data *v) {
-  array::data * o = to_array(j);
+  list::data * o = to_array(j);
   if (!o) 
     segfault();
-  array::append(o, v);
+  list::append(o, v);
 }
 
 void array_append_bool (json::data * j, bool b) {
-  array::data * o = to_array(j);
+  list::data * o = to_array(j);
   if (!o) 
     segfault();
-  array::append(o, mk_bool(b));
+  list::append(o, mk_bool(b));
 }
 
 void array_append_string (json::data * j, char * x) {
-  array::data * o = to_array(j);
+  list::data * o = to_array(j);
   if (!o) 
     segfault();
-  array::append(o, mk_string(str::mk("%s", x)));
+  list::append(o, mk_string(str::mk("%s", x)));
 }
 
 /*

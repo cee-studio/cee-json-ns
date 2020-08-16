@@ -180,26 +180,26 @@ bool parse(char * buf, uintptr_t len, json::data **out, bool force_eof,
           POP(sp);
           break;
         }
-        struct array::data * ar = json::to_array((json::data *)top->_[1]);
+        list::data * ar = json::to_array((json::data *)top->_[1]);
         
         if(c==tock_str)  {
-          array::append(ar, mk_string(tock.str));
+          list::append(ar, mk_string(tock.str));
           state=st_array_close_or_comma_expected;
         } 
         else if(c==tock_true) {
-          array::append(ar, mk_true());
+          list::append(ar, mk_true());
           state=st_array_close_or_comma_expected;
         } 
         else if(c==tock_false) {
-          array::append(ar, mk_false());
+          list::append(ar, mk_false());
           state=st_array_close_or_comma_expected;
         } 
         else if(c==tock_null) {
-          array::append(ar, mk_null());
+          list::append(ar, mk_null());
           state=st_array_close_or_comma_expected;
         } 
         else if(c==tock_number) {
-          array::append(ar, mk_number(tock.real));
+          list::append(ar, mk_number(tock.real));
           state=st_array_close_or_comma_expected;
         } 
         else if(c=='[') {

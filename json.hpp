@@ -33,7 +33,7 @@ struct data {
     singleton::data * boolean;
     boxed::data     * number;
     str::data       * string;
-    array::data     * array;
+    list::data      * array;
     map::data       * object;
   } value;
 };
@@ -56,7 +56,7 @@ extern json::data * load_from_file (FILE *, bool force_eof, int * error_at_line)
 extern json::data * load_from_buffer (int size, char *, int line);
 extern int cmp (json::data *, json::data *);
 
-extern array::data  * to_array (json::data *);
+extern list::data  * to_array (json::data *);
 extern map::data   * to_object (json::data *);
 extern boxed::data * to_number (json::data *);
 extern str::data   * to_string (json::data *);

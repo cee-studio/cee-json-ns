@@ -186,52 +186,51 @@ namespace str {
   extern str::data * ncat (str::data *, char * s, size_t);
 };
   
-/* an auto expandable array */
-namespace array {
+/* an auto expandable list */
+namespace list {
   struct data {
     void * _[1]; // an array of `void *`s
   };
 
   /*
-   * size: the initial size of the array
-   * when the array is deleted, its elements will be handled by 
+   * capacity: the initial capacity of the list
+   * when the list is deleted, its elements will be handled by 
    * the default deletion policy
    */
-  extern array::data * mk (size_t size);
-
+  extern list::data * mk (size_t capacity);
 
   /*
    *
    */
-  extern array::data * mk_e (enum del_policy o, size_t size);
+  extern list::data * mk_e (enum del_policy o, size_t size);
 
   /*
-   * it may return a new array if the parameter array is too small
+   * it may return a new list if the parameter list is too small
    */
-  extern array::data * append(array::data * v, void * e);
+  extern list::data * append(list::data * v, void * e);
 
 
   /*
    * it inserts an element e at index and shift the rest elements 
    * to higher indices
    */
-  extern array::data * insert(array::data * v, size_t index, void * e);
+  extern list::data * insert(list::data * v, size_t index, void * e);
 
   /*
    * it removes an element at index and shift the rest elements 
    * to lower indices
    */
-  extern array::data * remove(array::data * v, size_t index);
+  extern list::data * remove(list::data * v, size_t index);
 
   /*
-   * returns the number of elements in the array
+   * returns the number of elements in the list
    */
-  extern size_t size(array::data *);
+  extern size_t size(list::data *);
 
   /*
    *
    */
-  extern size_t capacity (array::data *);
+  extern size_t capacity (list::data *);
 };
 
   
@@ -320,7 +319,7 @@ namespace set {
   extern void clear (set::data * m);
   extern size_t size(set::data * m);
   extern bool empty(set::data * s);
-  extern array::data * values(set::data * m);
+  extern list::data * values(set::data * m);
   extern set::data * union_sets (set::data * s1, set::data * s2);
 }
 
@@ -340,8 +339,8 @@ namespace map {
   extern void add(map::data * m, void * key, void * value);
   extern void * find(map::data * m, void * key);
   extern void * remove(map::data *m, void * key);
-  extern array::data * keys(map::data *m);
-  extern array::data * values(map::data *m);
+  extern list::data * keys(map::data *m);
+  extern list::data * values(map::data *m);
 };
 
 
@@ -496,7 +495,7 @@ namespace tagged {
     void * _;
     str::data       * str;
     set::data       * set;
-    array::data     * array;
+    list::data      * list;
     map::data       * map;
     dict::data      * dict;
     tuple::data     * tuple;
@@ -1114,8 +1113,8 @@ str::data * ncat (str::data * str, char * s, size_t slen) {
 namespace cee {
   namespace dict {
 struct _cee_dict_header {
-  struct array::data * keys;
-  struct array::data * vals;
+  struct list::data * keys;
+  struct list::data * vals;
   uintptr_t size;
   enum del_policy del_policy;
   struct sect cs;
@@ -1132,9 +1131,9 @@ dict::data * mk_e (enum del_policy o, size_t size) {
   size_t mem_block_size = sizeof(struct _cee_dict_header);
   struct _cee_dict_header * m = (struct _cee_dict_header *)malloc(mem_block_size);
   m->del_policy = o;
-  m->keys = array::mk(size);
+  m->keys = list::mk(size);
   use_realloc(m->keys);
-  m->vals = array::mk(size);
+  m->vals = list::mk(size);
   use_realloc(m->vals);
   m->size = size;
   do{ memset(&m->cs, 0, sizeof(struct cee::sect)); } while(0);;
@@ -1284,24 +1283,24 @@ void * remove(map::data * m, void * key) {
 static void _cee_map_get_key (const void *nodep, const VISIT which, const int depth) {
   struct _cee_map_pair * p;
   struct _cee_map_header * h;
-  array::data * keys;
+  list::data * keys;
   switch (which)
   {
     case preorder:
     case leaf:
       p = *(struct _cee_map_pair **)nodep;
       h = p->h;
-      keys = (array::data *)h->context;
-      h->context = array::append(keys, p->value->_[0]);
+      keys = (list::data *)h->context;
+      h->context = list::append(keys, p->value->_[0]);
       break;
     default:
       break;
   }
 }
-array::data * keys(map::data * m) {
+list::data * keys(map::data * m) {
   uintptr_t s = map::size(m);
   struct _cee_map_header * b = (struct _cee_map_header *)((void *)((char *)(m) - (__builtin_offsetof(struct _cee_map_header, _))));
-  array::data * keys = array::mk(s);
+  list::data * keys = list::mk(s);
   b->context = keys;
   twalk(b->_[0], _cee_map_get_key);
   return keys;
@@ -1309,24 +1308,24 @@ array::data * keys(map::data * m) {
 static void _cee_map_get_value (const void *nodep, const VISIT which, const int depth) {
   struct _cee_map_pair * p;
   struct _cee_map_header * h;
-  array::data * values;
+  list::data * values;
   switch (which)
   {
     case preorder:
     case leaf:
       p = (struct _cee_map_pair *)*(void **)nodep;
       h = p->h;
-      values = (array::data *)h->context;
-      h->context = array::append(values, p->value->_[1]);
+      values = (list::data *)h->context;
+      h->context = list::append(values, p->value->_[1]);
       break;
     default:
       break;
   }
 }
-array::data * values(map::data * m) {
+list::data * values(map::data * m) {
   uintptr_t s = map::size(m);
   struct _cee_map_header * b = (struct _cee_map_header *)((void *)((char *)(m) - (__builtin_offsetof(struct _cee_map_header, _))));
-  array::data * values = array::mk(s);
+  list::data * values = list::mk(s);
   b->context = values;
   twalk(b->_[0], _cee_map_get_value);
   return values;
@@ -1452,19 +1451,19 @@ static void _cee_set_get_value (const void *nodep, const VISIT which, const int 
     case leaf:
       p = (_cee_set_pair *)*(void **)nodep;
       h = p->h;
-      h->context = array::append((array::data *) h->context, p->value);
+      h->context = list::append((list::data *) h->context, p->value);
       break;
     default:
       break;
   }
 }
-array::data * values(set::data * m) {
+list::data * values(set::data * m) {
   uintptr_t s = set::size(m);
   struct _cee_set_header * h = (struct _cee_set_header *)((void *)((char *)(m) - (__builtin_offsetof(struct _cee_set_header, _))));
-  h->context = array::mk(s);
+  h->context = list::mk(s);
   use_realloc(h->context);
   twalk(h->_[0], _cee_set_get_value);
-  return (array::data *)h->context;
+  return (list::data *)h->context;
 }
 void * remove(set::data *m, void * key) {
   struct _cee_set_header * h = (struct _cee_set_header *)((void *)((char *)(m) - (__builtin_offsetof(struct _cee_set_header, _))));
@@ -1484,12 +1483,12 @@ set::data * union_set (set::data * s1, set::data * s2) {
   struct _cee_set_header * h2 = (struct _cee_set_header *)((void *)((char *)(s2) - (__builtin_offsetof(struct _cee_set_header, _))));
   if (h1->cmp == h2->cmp) {
     set::data * s0 = set::mk(h1->cmp);
-    array::data * v1 = set::values(s1);
-    array::data * v2 = set::values(s2);
+    list::data * v1 = set::values(s1);
+    list::data * v2 = set::values(s2);
     int i;
-    for (i = 0; i < array::size(v1); i++)
+    for (i = 0; i < list::size(v1); i++)
       set::add(s0, v1->_[i]);
-    for (i = 0; i < array::size(v2); i++)
+    for (i = 0; i < list::size(v2); i++)
       set::add(s0, v2->_[i]);
     del(v1);
     del(v2);
@@ -1699,25 +1698,25 @@ quadruple::data * mk_e (enum del_policy o[4], void * v1, void * v2, void * v3,
   }
 }
 namespace cee {
-namespace array {
-struct _cee_array_header {
+namespace list {
+struct _cee_list_header {
   uintptr_t size;
   uintptr_t capacity;
   enum del_policy del_policy;
   struct sect cs;
   void * _[];
 };
-static struct _cee_array_header * _cee_array_resize(struct _cee_array_header * h, size_t s)
+static struct _cee_list_header * _cee_list_resize(struct _cee_list_header * h, size_t s)
 {
-  struct _cee_array_header * ret;
+  struct _cee_list_header * ret;
   switch(h->cs.resize_method)
   {
     case resize_with_realloc:
-     ret = (struct _cee_array_header *)realloc(h, s);
+     ret = (struct _cee_list_header *)realloc(h, s);
       ret->cs.mem_block_size = s;
       break;
     case resize_with_malloc:
-     ret = (struct _cee_array_header *)malloc(s);
+     ret = (struct _cee_list_header *)malloc(s);
      memcpy(ret, h, h->cs.mem_block_size);
       ret->cs.mem_block_size = s;
       break;
@@ -1727,50 +1726,50 @@ static struct _cee_array_header * _cee_array_resize(struct _cee_array_header * h
   }
   return ret;
 }
-static void _cee_array_del (void * v) {
-  struct _cee_array_header * m = (struct _cee_array_header *)((void *)((char *)(v) - (__builtin_offsetof(struct _cee_array_header, _))));
+static void _cee_list_del (void * v) {
+  struct _cee_list_header * m = (struct _cee_list_header *)((void *)((char *)(v) - (__builtin_offsetof(struct _cee_list_header, _))));
   int i;
   for (i = 0; i < m->size; i++)
     del_e(m->del_policy, m->_[i]);
   free(m);
 }
-array::data * mk_e (enum del_policy o, size_t cap) {
-  size_t mem_block_size = sizeof(struct _cee_array_header) + cap * sizeof(void *);
-  struct _cee_array_header * m = (struct _cee_array_header *)malloc(mem_block_size);
+list::data * mk_e (enum del_policy o, size_t cap) {
+  size_t mem_block_size = sizeof(struct _cee_list_header) + cap * sizeof(void *);
+  struct _cee_list_header * m = (struct _cee_list_header *)malloc(mem_block_size);
   m->capacity = cap;
   m->size = 0;
   m->del_policy = o;
   do{ memset(&m->cs, 0, sizeof(struct cee::sect)); } while(0);;
-  m->cs.del = _cee_array_del;
+  m->cs.del = _cee_list_del;
   m->cs.resize_method = resize_with_malloc;
   m->cs.mem_block_size = mem_block_size;
-  return (array::data *)(m->_);
+  return (list::data *)(m->_);
 }
-array::data * mk (size_t cap) {
+list::data * mk (size_t cap) {
   return mk_e(CEE_DEFAULT_DEL_POLICY, cap);
 }
-array::data * append (array::data * v, void *e) {
-  struct _cee_array_header * m = (struct _cee_array_header *)((void *)((char *)(v) - (__builtin_offsetof(struct _cee_array_header, _))));
+list::data * append (list::data * v, void *e) {
+  struct _cee_list_header * m = (struct _cee_list_header *)((void *)((char *)(v) - (__builtin_offsetof(struct _cee_list_header, _))));
   size_t capacity = m->capacity;
   size_t extra_cap = capacity ? capacity : 1;
   if (m->size == m->capacity) {
     size_t new_mem_block_size = m->cs.mem_block_size + extra_cap * sizeof(void *);
-    struct _cee_array_header * m1 = _cee_array_resize(m, new_mem_block_size);
+    struct _cee_list_header * m1 = _cee_list_resize(m, new_mem_block_size);
     m1->capacity = capacity + extra_cap;
     m = m1;
   }
   m->_[m->size] = e;
   m->size ++;
   incr_indegree(m->del_policy, e);
-  return (array::data *)m->_;
+  return (list::data *)m->_;
 }
-array::data * insert(array::data * v, size_t index, void *e) {
-  struct _cee_array_header * m = (struct _cee_array_header *)((void *)((char *)(v) - (__builtin_offsetof(struct _cee_array_header, _))));
+list::data * insert(list::data * v, size_t index, void *e) {
+  struct _cee_list_header * m = (struct _cee_list_header *)((void *)((char *)(v) - (__builtin_offsetof(struct _cee_list_header, _))));
   size_t capacity = m->capacity;
   size_t extra_cap = capacity ? capacity : 1;
   if (m->size == m->capacity) {
     size_t new_mem_block_size = m->cs.mem_block_size + extra_cap * sizeof(void *);
-    struct _cee_array_header * m1 = _cee_array_resize(m, new_mem_block_size);
+    struct _cee_list_header * m1 = _cee_list_resize(m, new_mem_block_size);
     m1->capacity = capacity + extra_cap;
     m = m1;
   }
@@ -1780,10 +1779,10 @@ array::data * insert(array::data * v, size_t index, void *e) {
   m->_[index] = e;
   m->size ++;
   incr_indegree(m->del_policy, e);
-  return (array::data *)m->_;
+  return (list::data *)m->_;
 }
-array::data * remove(array::data * v, size_t index) {
-  struct _cee_array_header * m = (struct _cee_array_header *)((void *)((char *)(v) - (__builtin_offsetof(struct _cee_array_header, _))));
+list::data * remove(list::data * v, size_t index) {
+  struct _cee_list_header * m = (struct _cee_list_header *)((void *)((char *)(v) - (__builtin_offsetof(struct _cee_list_header, _))));
   if (index >= m->size) return v;
   void * e = m->_[index];
   m->_[index] = 0;
@@ -1792,14 +1791,14 @@ array::data * remove(array::data * v, size_t index) {
     m->_[i] = m->_[i+1];
   m->size --;
   decr_indegree(m->del_policy, e);
-  return (array::data *)m->_;
+  return (list::data *)m->_;
 }
-size_t size (array::data *x) {
-  struct _cee_array_header * m = (struct _cee_array_header *)((void *)((char *)(x) - (__builtin_offsetof(struct _cee_array_header, _))));
+size_t size (list::data *x) {
+  struct _cee_list_header * m = (struct _cee_list_header *)((void *)((char *)(x) - (__builtin_offsetof(struct _cee_list_header, _))));
   return m->size;
 }
-size_t capacity (array::data * x) {
-  struct _cee_array_header * h = (struct _cee_array_header *)((void *)((char *)(x) - (__builtin_offsetof(struct _cee_array_header, _))));
+size_t capacity (list::data * x) {
+  struct _cee_list_header * h = (struct _cee_list_header *)((void *)((char *)(x) - (__builtin_offsetof(struct _cee_list_header, _))));
   return h->capacity;
 }
   }
