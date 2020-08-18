@@ -40,31 +40,31 @@ json::data * mk_null () {
 }
 
 map::data * to_object (json::data * p) {
-  if (p->t == type_is_object) {
+  if (p->t == type_is_object)
     return p->value.object;
-  }
-  return NULL;
+  else
+    return NULL;
 }
 
 list::data * to_array (json::data * p) {
-  if (p->t == type_is_array) {
+  if (p->t == type_is_array)
     return p->value.array;
-  }
-  return NULL;
+  else
+    return NULL;
 }
 
 str::data * to_string (json::data * p) {
-  if (p->t == type_is_string) {
+  if (p->t == type_is_string)
     return p->value.string;
-  }
-  return NULL;
+  else
+    return NULL;
 }
 
 boxed::data * to_number (json::data * p) {
-  if (p->t  == type_is_number) {
+  if (p->t  == type_is_number)
     return p->value.number;
-  }
-  return NULL;
+  else
+    return NULL;
 }
 
 bool to_bool (json::data * p) {
@@ -132,21 +132,21 @@ void array_append (json::data * j, json::data *v) {
   list::data * o = to_array(j);
   if (!o) 
     segfault();
-  list::append(o, v);
+  list::append(&o, v);
 }
 
 void array_append_bool (json::data * j, bool b) {
   list::data * o = to_array(j);
   if (!o) 
     segfault();
-  list::append(o, mk_bool(b));
+  list::append(&o, mk_bool(b));
 }
 
 void array_append_string (json::data * j, char * x) {
   list::data * o = to_array(j);
   if (!o) 
     segfault();
-  list::append(o, mk_string(str::mk("%s", x)));
+  list::append(&o, mk_string(str::mk("%s", x)));
 }
 
 /*

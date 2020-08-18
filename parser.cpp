@@ -183,23 +183,23 @@ bool parse(char * buf, uintptr_t len, json::data **out, bool force_eof,
         list::data * ar = json::to_array((json::data *)top->_[1]);
         
         if(c==tock_str)  {
-          list::append(ar, mk_string(tock.str));
+          list::append(&ar, mk_string(tock.str));
           state=st_array_close_or_comma_expected;
         } 
         else if(c==tock_true) {
-          list::append(ar, mk_true());
+          list::append(&ar, mk_true());
           state=st_array_close_or_comma_expected;
         } 
         else if(c==tock_false) {
-          list::append(ar, mk_false());
+          list::append(&ar, mk_false());
           state=st_array_close_or_comma_expected;
         } 
         else if(c==tock_null) {
-          list::append(ar, mk_null());
+          list::append(&ar, mk_null());
           state=st_array_close_or_comma_expected;
         } 
         else if(c==tock_number) {
-          list::append(ar, mk_number(tock.real));
+          list::append(&ar, mk_number(tock.real));
           state=st_array_close_or_comma_expected;
         } 
         else if(c=='[') {

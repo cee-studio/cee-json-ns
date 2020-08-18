@@ -207,20 +207,20 @@ namespace list {
   /*
    * it may return a new list if the parameter list is too small
    */
-  extern list::data * append(list::data * v, void * e);
+  extern list::data * append(list::data ** v, void * e);
 
 
   /*
    * it inserts an element e at index and shift the rest elements 
    * to higher indices
    */
-  extern list::data * insert(list::data * v, size_t index, void * e);
+  extern list::data * insert(list::data ** v, size_t index, void * e);
 
   /*
    * it removes an element at index and shift the rest elements 
    * to lower indices
    */
-  extern list::data * remove(list::data * v, size_t index);
+  extern bool remove(list::data * v, size_t index);
 
   /*
    * returns the number of elements in the list
@@ -1162,8 +1162,8 @@ void add (dict::data * d, char * key, void * value) {
   n.data = value;
   if (!hsearch_r(n, ENTER, &np, m->_))
     segfault();
-  m->keys = append(m->keys, key);
-  m->vals = append(m->vals, value);
+  append(&m->keys, key);
+  append(&m->vals, value);
 }
 void * find(dict::data * d, char * key) {
   struct _cee_dict_header * m = (struct _cee_dict_header *)((void *)((char *)(d) - (__builtin_offsetof(struct _cee_dict_header, _))));
@@ -1290,8 +1290,7 @@ static void _cee_map_get_key (const void *nodep, const VISIT which, const int de
     case leaf:
       p = *(struct _cee_map_pair **)nodep;
       h = p->h;
-      keys = (list::data *)h->context;
-      h->context = list::append(keys, p->value->_[0]);
+      list::append((list::data **)&h->context, p->value->_[0]);
       break;
     default:
       break;
@@ -1315,8 +1314,7 @@ static void _cee_map_get_value (const void *nodep, const VISIT which, const int 
     case leaf:
       p = (struct _cee_map_pair *)*(void **)nodep;
       h = p->h;
-      values = (list::data *)h->context;
-      h->context = list::append(values, p->value->_[1]);
+      list::append((list::data **)&h->context, p->value->_[1]);
       break;
     default:
       break;
@@ -1451,7 +1449,7 @@ static void _cee_set_get_value (const void *nodep, const VISIT which, const int 
     case leaf:
       p = (_cee_set_pair *)*(void **)nodep;
       h = p->h;
-      h->context = list::append((list::data *) h->context, p->value);
+      list::append((list::data **) &h->context, p->value);
       break;
     default:
       break;
@@ -1748,7 +1746,12 @@ list::data * mk_e (enum del_policy o, size_t cap) {
 list::data * mk (size_t cap) {
   return mk_e(CEE_DEFAULT_DEL_POLICY, cap);
 }
-list::data * append (list::data * v, void *e) {
+list::data * append (list::data ** l, void *e) {
+  list::data * v = *l;
+  if (v == NULL) {
+    v = mk(10);
+    use_realloc(v);
+  }
   struct _cee_list_header * m = (struct _cee_list_header *)((void *)((char *)(v) - (__builtin_offsetof(struct _cee_list_header, _))));
   size_t capacity = m->capacity;
   size_t extra_cap = capacity ? capacity : 1;
@@ -1761,9 +1764,15 @@ list::data * append (list::data * v, void *e) {
   m->_[m->size] = e;
   m->size ++;
   incr_indegree(m->del_policy, e);
-  return (list::data *)m->_;
+  *l = (list::data *)m->_;
+  return *l;
 }
-list::data * insert(list::data * v, size_t index, void *e) {
+list::data * insert(list::data ** l, size_t index, void *e) {
+  list::data * v = *l;
+  if (v == NULL) {
+    v = mk(10);
+    use_realloc(v);
+  }
   struct _cee_list_header * m = (struct _cee_list_header *)((void *)((char *)(v) - (__builtin_offsetof(struct _cee_list_header, _))));
   size_t capacity = m->capacity;
   size_t extra_cap = capacity ? capacity : 1;
@@ -1779,11 +1788,12 @@ list::data * insert(list::data * v, size_t index, void *e) {
   m->_[index] = e;
   m->size ++;
   incr_indegree(m->del_policy, e);
-  return (list::data *)m->_;
+  *l = (list::data *)m->_;
+  return *l;
 }
-list::data * remove(list::data * v, size_t index) {
+bool remove(list::data * v, size_t index) {
   struct _cee_list_header * m = (struct _cee_list_header *)((void *)((char *)(v) - (__builtin_offsetof(struct _cee_list_header, _))));
-  if (index >= m->size) return v;
+  if (index >= m->size) return false;
   void * e = m->_[index];
   m->_[index] = 0;
   int i;
@@ -1791,7 +1801,7 @@ list::data * remove(list::data * v, size_t index) {
     m->_[i] = m->_[i+1];
   m->size --;
   decr_indegree(m->del_policy, e);
-  return (list::data *)m->_;
+  return true;
 }
 size_t size (list::data *x) {
   struct _cee_list_header * m = (struct _cee_list_header *)((void *)((char *)(x) - (__builtin_offsetof(struct _cee_list_header, _))));

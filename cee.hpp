@@ -197,20 +197,20 @@ namespace list {
   /*
    * it may return a new list if the parameter list is too small
    */
-  extern list::data * append(list::data * v, void * e);
+  extern list::data * append(list::data ** v, void * e);
 
 
   /*
    * it inserts an element e at index and shift the rest elements 
    * to higher indices
    */
-  extern list::data * insert(list::data * v, size_t index, void * e);
+  extern list::data * insert(list::data ** v, size_t index, void * e);
 
   /*
    * it removes an element at index and shift the rest elements 
    * to lower indices
    */
-  extern list::data * remove(list::data * v, size_t index);
+  extern bool remove(list::data * v, size_t index);
 
   /*
    * returns the number of elements in the list
