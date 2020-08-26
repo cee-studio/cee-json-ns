@@ -28,8 +28,8 @@ enum state_type {
 
 static const uintptr_t json_max_depth = 512;
 
-bool parse(char * buf, uintptr_t len, json::data **out, bool force_eof, 
-           int *error_at_line)
+bool parse(state::data * st, char * buf, uintptr_t len, json::data **out, 
+           bool force_eof, int *error_at_line)
 {
   struct tokenizer tock = {0};
   tock.buf = buf;
@@ -39,12 +39,12 @@ bool parse(char * buf, uintptr_t len, json::data **out, bool force_eof,
   enum state_type state = st_init;
   str::data * key = NULL;
   
-  stack::data * sp = stack::mk_e (dp_noop, json_max_depth);
+  stack::data * sp = stack::mk_e (st, dp_noop, json_max_depth);
   tuple::data * top = NULL;
   tuple::data * result = NULL;
   static enum del_policy del_noops[2] = { dp_noop, dp_noop };
 
-#define SPI(st, j)   tuple::mk_e(del_noops, (void *)st, j)
+#define SPI(s, j)    tuple::mk_e(st, del_noops, (void *)s, j)
 #define TOPS         (static_cast<enum state_type>(reinterpret_cast<intptr_t>(top->_[0])))
 #define POP(sp)      { result = (struct tuple::data *)stack::pop(sp); }
   
@@ -58,7 +58,7 @@ bool parse(char * buf, uintptr_t len, json::data **out, bool force_eof,
       result = NULL;
     }
 
-    int c = next_token(&tock);
+    int c = next_token(st, &tock);
 #ifdef DEBUG_PARSER
     printf ("token %c\n", c);
 #endif
@@ -67,36 +67,36 @@ bool parse(char * buf, uintptr_t len, json::data **out, bool force_eof,
     switch(state) {
     case st_object_or_array_or_value_expected:
       if(c=='[')  {
-        top->_[1]= mk_array(10);
+        top->_[1]= mk_array(st, 10);
         state=st_array_value_or_close_expected;
       }
       else if(c=='{') {
-        top->_[1]= mk_object();
+        top->_[1]= mk_object(st);
         state=st_object_key_or_close_expected;
       }
       else if(c==tock_str)  {
-        top->_[1]= mk_string(tock.str);
+        top->_[1]= mk_string(st, tock.str);
         tock.str = NULL;
         state=TOPS;
         POP(sp);
       }
       else if(c==tock_true) {
-        top->_[1]= mk_true();
+        top->_[1]= mk_true(st);
         state=TOPS;
         POP(sp);
       }
       else if(c==tock_false) {
-        top->_[1] = mk_false();
+        top->_[1] = mk_false(st);
         state=TOPS;
         POP(sp);
       }
       else if(c==tock_null) {
-        top->_[1] = mk_null();
+        top->_[1] = mk_null(st);
         state=TOPS;
         POP(sp);
       }
       else if(c==tock_number) {
-        top->_[1] = mk_number (tock.real);
+        top->_[1] = mk_number (st, tock.real);
         state=TOPS;
         POP(sp);
       }
@@ -127,34 +127,34 @@ bool parse(char * buf, uintptr_t len, json::data **out, bool force_eof,
       {
         map::data * obj = json::to_object((json::data *)top->_[1]);
         if(c==tock_str) {
-          map::add(obj, key, mk_string(tock.str));
+          map::add(obj, key, mk_string(st, tock.str));
           tock.str = NULL;
           state=st_object_close_or_comma_expected;
         }
         else if(c==tock_true) {
-          map::add(obj, key, mk_true());
+          map::add(obj, key, mk_true(st));
           state=st_object_close_or_comma_expected;
         }
         else if(c==tock_false) {
-          map::add(obj, key, mk_false());
+          map::add(obj, key, mk_false(st));
           state=st_object_close_or_comma_expected;
         }
         else if(c==tock_null) {
-          map::add(obj, key, mk_null());
+          map::add(obj, key, mk_null(st));
           state=st_object_close_or_comma_expected;
         }
         else if(c==tock_number) {
-          map::add(obj, key, mk_number(tock.real));
+          map::add(obj, key, mk_number(st, tock.real));
           state=st_object_close_or_comma_expected;
         }
         else if(c=='[') {
-          json::data * a = mk_array(10);
+          json::data * a = mk_array(st, 10);
           map::add(obj, key, a);
           state=st_array_value_or_close_expected;
           stack::push(sp, SPI(st_object_close_or_comma_expected, a));
         }
         else if(c=='{') {
-          json::data * o = mk_object();
+          json::data * o = mk_object(st);
           map::add(obj, key, o);
           state=st_object_key_or_close_expected;
           stack::push(sp, SPI(st_object_close_or_comma_expected, o));
@@ -183,32 +183,32 @@ bool parse(char * buf, uintptr_t len, json::data **out, bool force_eof,
         list::data * ar = json::to_array((json::data *)top->_[1]);
         
         if(c==tock_str)  {
-          list::append(&ar, mk_string(tock.str));
+          list::append(&ar, mk_string(st, tock.str));
           state=st_array_close_or_comma_expected;
         } 
         else if(c==tock_true) {
-          list::append(&ar, mk_true());
+          list::append(&ar, mk_true(st));
           state=st_array_close_or_comma_expected;
         } 
         else if(c==tock_false) {
-          list::append(&ar, mk_false());
+          list::append(&ar, mk_false(st));
           state=st_array_close_or_comma_expected;
         } 
         else if(c==tock_null) {
-          list::append(&ar, mk_null());
+          list::append(&ar, mk_null(st));
           state=st_array_close_or_comma_expected;
         } 
         else if(c==tock_number) {
-          list::append(&ar, mk_number(tock.real));
+          list::append(&ar, mk_number(st, tock.real));
           state=st_array_close_or_comma_expected;
-        } 
+        }
         else if(c=='[') {
-          json::data * a = mk_array(10);
+          json::data * a = mk_array(st, 10);
           state=st_array_value_or_close_expected;
           stack::push(sp, SPI(st_array_close_or_comma_expected,a));
         }
         else if(c=='{') {
-          json::data * o = mk_object();
+          json::data * o = mk_object(st);
           state=st_object_key_or_close_expected;
           stack::push(sp, SPI(st_array_close_or_comma_expected,o));
         }
@@ -235,7 +235,7 @@ bool parse(char * buf, uintptr_t len, json::data **out, bool force_eof,
   del(sp);
   if(state==st_done) { 
     if(force_eof) {
-      if(next_token(&tock)!=tock_eof) {
+      if(next_token(st, &tock)!=tock_eof) {
         *error_at_line=tock.line;
         return false;
       }

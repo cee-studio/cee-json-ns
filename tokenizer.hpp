@@ -23,7 +23,7 @@ struct tokenizer {
   double real;
 };
 
-extern enum token next_token(struct tokenizer * t);
+extern enum token next_token(state::data *, struct tokenizer * t);
     
   }
 }

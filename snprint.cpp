@@ -18,18 +18,18 @@ struct counter {
   char more_siblings;
 };
 
-static struct counter * push(uintptr_t tabs, bool more_siblings, 
+static struct counter * push(state::data * st, uintptr_t tabs, bool more_siblings, 
                              stack::data * sp, json::data * j) {
   struct counter * p = NULL;
   if (j == NULL) {
-    p = (struct counter *)block::mk(sizeof(struct counter));
+    p = (struct counter *)block::mk(st, sizeof(struct counter));
     p->tabs = 0;
   }
   else {
     switch(j->t) {
       case type_is_object:
         {
-          p = (struct counter *) block::mk(sizeof(struct counter));
+          p = (struct counter *) block::mk(st, sizeof(struct counter));
           map::data * mp = to_object(j);
           p->array = map::keys(mp);
           p->object = to_object(j);
@@ -40,7 +40,7 @@ static struct counter * push(uintptr_t tabs, bool more_siblings,
         break;
       case type_is_array:
         {
-          p = (struct counter *)block::mk(sizeof(struct counter));
+          p = (struct counter *)block::mk(st, sizeof(struct counter));
           p->array = to_array(j);
           p->tabs = tabs;
           p->next = 0;
@@ -49,7 +49,7 @@ static struct counter * push(uintptr_t tabs, bool more_siblings,
         break;
       default:  
         {
-          p = (struct counter *)block::mk(sizeof(struct counter));
+          p = (struct counter *)block::mk(st, sizeof(struct counter));
           p->array = NULL;
           p->tabs = tabs;
           p->next = 0;
@@ -60,7 +60,7 @@ static struct counter * push(uintptr_t tabs, bool more_siblings,
     p->more_siblings = more_siblings;
   }
   enum del_policy o[2] = { dp_del, dp_noop };
-  stack::push(sp, tuple::mk_e(o, p, j));
+  stack::push(sp, tuple::mk_e(st, o, p, j));
   return p;
 }
 
@@ -182,14 +182,14 @@ static void str_append(char * out, uintptr_t *offp, char *begin, unsigned len) {
 /*
  * compute how many bytes are needed to serialize orca_json as a string
  */
-size_t snprint (char * buf, size_t size, json::data * j, enum format f) {
+size_t snprint (state::data * st, char * buf, size_t size, json::data * j, enum format f) {
   tuple::data * cur;
   json::data * cur_orca_json;
   struct counter * ccnt;
   uintptr_t incr = 0;
   
-  stack::data * sp = stack::mk_e(dp_noop, 500);
-  push (0, false, sp, j);
+  stack::data * sp = stack::mk_e(st, dp_noop, 500);
+  push (st, 0, false, sp, j);
   
   uintptr_t offset = 0;
   while (!stack::empty(sp) && !stack::full(sp)) {
@@ -269,7 +269,8 @@ size_t snprint (char * buf, size_t size, json::data * j, enum format f) {
             if (1 < n && i+1 < n)
               more_siblings = true;
             ccnt->next++;
-            push (ccnt->tabs + 1, more_siblings, sp, (json::data *)(ccnt->array->_[i]));
+            push (st, ccnt->tabs + 1, more_siblings, sp, 
+                  (json::data *)(ccnt->array->_[i]));
           }
           else {
             delimiter(&offset, buf, f, ccnt, ']');
@@ -298,7 +299,7 @@ size_t snprint (char * buf, size_t size, json::data * j, enum format f) {
             pad(&offset, buf, ccnt, f);
             str_append(buf, &offset, key, klen);
             delimiter(&offset, buf, f, ccnt, ':');
-            push (ccnt->tabs + 1, more_siblings, sp, j1);
+            push (st, ccnt->tabs + 1, more_siblings, sp, j1);
           }
           else {
             delimiter(&offset, buf, f, ccnt, '}');

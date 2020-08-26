@@ -20,15 +20,23 @@
 #include <stdbool.h>
 
 namespace cee {
+  namespace state { struct data; };
+  
 typedef uintptr_t tag_t;
 typedef int (*cmp_fun) (const void *, const void *);
 
 enum resize_method {
   resize_with_identity = 0, // resize with identity function
-  resize_with_malloc = 1,
-  resize_with_realloc = 2
+  resize_with_malloc = 1,   // resize with malloc  (safe, but leak)
+  resize_with_realloc = 2   // resize with realloc (probably unsafe)
 };
 
+
+enum trace_action {
+  trace_del_no_follow = 0,
+  trace_del_follow, // trace points-to graph and delete each node
+  trace_mark,       // trace points-to graph and mark each node
+};
 
 /*
  * a cotainer is an instance of struct cee_*
@@ -73,14 +81,18 @@ enum del_policy {
  *
  */
 struct sect {
-  uint8_t cmp_stop_at_null:1; // 0: compare all bytes, otherwise stop at '\0'
-  uint8_t resize_method:2;    // three values: identity, malloc, realloc
-  uint8_t retained:1;         // if it is retained, in_degree is ignored
-  uint8_t n_product;          // n-ary (no more than 256) product type
-  uint16_t in_degree;         // the number of cee objects points to this object
-  uintptr_t mem_block_size;   // the size of a memory block enclosing this struct
-  void *cmp;                  // compare two memory blocks
-  void (*del)(void *);        // the object specific delete function
+  uint8_t  cmp_stop_at_null:1;    // 0: compare all bytes, otherwise stop at '\0'
+  uint8_t  resize_method:2;       // three values: identity, malloc, realloc
+  uint8_t  retained:1;            // if it is retained, in_degree is ignored
+  uint8_t  gc_mark:2;             // used for mark & sweep gc
+  uint8_t  n_product;             // n-ary (no more than 256) product type
+  uint16_t in_degree;             // the number of cee objects points to this object
+  state::data * state;            // the gc state under which this block is allocated
+  struct sect * trace_next;       // used for chaining cee::_::data to be traced
+  struct sect * trace_prev;       // used for chaining cee::_::data to be traced
+  uintptr_t mem_block_size;       // the size of a memory block enclosing this struct
+  void *cmp;                      // compare two memory blocks
+  void (*trace)(void *, enum trace_action);// the object specific scan function
 };
 
 
@@ -102,7 +114,7 @@ namespace block {
    * return: the address of the first byte in consecutive bytes, the address 
    *         can be freed by cee_del
    */
-  extern void * mk (size_t n);
+  extern void * mk (state::data * s, size_t n);
 };
 
   
@@ -137,7 +149,7 @@ namespace str {
    *      cee_str ("%d", 10);
    *
    */
-  extern str::data  * mk (const char * fmt, ...);
+  extern str::data  * mk (state::data *s, const char * fmt, ...);
 
 
   /*
@@ -158,7 +170,7 @@ namespace str {
    *      cee_str_n(100, "%d", 10);
    *
    */
-  extern str::data  * mk_e (size_t n, const char * fmt, ...);
+  extern str::data  * mk_e (state::data * s, size_t n, const char * fmt, ...);
 
   /*
    * return the pointer of the null terminator;
@@ -197,12 +209,12 @@ namespace list {
    * when the list is deleted, its elements will be handled by 
    * the default deletion policy
    */
-  extern list::data * mk (size_t capacity);
+  extern list::data * mk (state::data * s, size_t capacity);
 
   /*
    *
    */
-  extern list::data * mk_e (enum del_policy o, size_t size);
+  extern list::data * mk_e (state::data * s, enum del_policy o, size_t size);
 
   /*
    * it may return a new list if the parameter list is too small
@@ -217,7 +229,7 @@ namespace list {
   extern list::data * insert(list::data ** v, size_t index, void * e);
 
   /*
-   * it removes an element at index and shift the rest elements 
+   * it removes an element at index and shift the rest elements
    * to lower indices
    */
   extern bool remove(list::data * v, size_t index);
@@ -245,8 +257,9 @@ namespace tuple {
    * v1: the first value of the tuple
    * v2: the second value of the tuple
    */
-  extern tuple::data * mk (void * v1, void * v2);
-  extern tuple::data * mk_e (enum del_policy o[2], void * v1, void * v2);
+  extern tuple::data * mk (state::data * s, void * v1, void * v2);
+  extern tuple::data * mk_e (state::data * s, 
+                             enum del_policy o[2], void * v1, void * v2);
 }
 
 namespace triple {
@@ -261,8 +274,9 @@ namespace triple {
    * v3: the third value of the triple
    * when the triple is deleted, its elements will not be deleted
    */
-  extern triple::data * mk(void * v1, void * v2, void * v3);
-  extern triple::data * mk_e(enum del_policy o[3], void * v1, void * v2, void * v3);
+  extern triple::data * mk(state::data * s, void * v1, void * v2, void * v3);
+  extern triple::data * mk_e(state::data * s, 
+                             enum del_policy o[3], void * v1, void * v2, void * v3);
 };
 
   
@@ -279,17 +293,20 @@ namespace quadruple {
    * v4: the fourth value of the quadruple
    * when the quadruple is deleted, its elements will not be deleted
    */
-  extern quadruple::data * mk(void * v1, void * v2, void * v3, void * v4);
+  extern quadruple::data * mk(state::data * s, 
+                              void * v1, void * v2, void * v3, void * v4);
 
-  extern quadruple::data * mk_e(enum del_policy o[4], void * v1, void * v2, void *v3, void *v4);
+  extern quadruple::data * mk_e(state::data * s, 
+                                enum del_policy o[4], void * v1, void * v2, 
+                                void *v3, void *v4);
 }
 
 namespace n_tuple {
   struct data {
     void * _[1];  // n elements
   };
-  extern n_tuple::data * mk (size_t n, ...);
-  extern n_tuple::data * mk_e (size_t n, enum del_policy o[], ...);
+  extern n_tuple::data * mk (state::data * s, size_t n, ...);
+  extern n_tuple::data * mk_e (state::data * s, size_t n, enum del_policy o[], ...);
 };
 
 
@@ -309,8 +326,8 @@ namespace set {
    * dt: specifiy how its element should be handled when the set is deleted.
    *
    */
-  extern set::data * mk (int (*cmp)(const void *, const void *));
-  extern set::data * mk_e (enum del_policy o, 
+  extern set::data * mk (state::data * s, int (*cmp)(const void *, const void *));
+  extern set::data * mk_e (state::data *s, enum del_policy o, 
                            int (*cmp)(const void *, const void *));
 
   extern void add(set::data * m, void * key);
@@ -332,8 +349,8 @@ namespace map {
    * map implementation based on binary tree
    * add/remove
    */
-  extern map::data * mk(cmp_fun cmp);
-  extern map::data * mk_e(enum del_policy o[2], cmp_fun cmp);
+  extern map::data * mk(state::data * s, cmp_fun cmp);
+  extern map::data * mk_e(state::data * s, enum del_policy o[2], cmp_fun cmp);
 
   extern uintptr_t size(map::data *);
   extern void add(map::data * m, void * key, void * value);
@@ -360,8 +377,8 @@ namespace dict {
   /*
    *
    */
-  extern dict::data * mk (size_t s);
-  extern dict::data * mk_e (enum del_policy o, size_t s);
+  extern dict::data * mk (state::data * s, size_t n);
+  extern dict::data * mk_e (state::data * s, enum del_policy o, size_t n);
 
   extern void add(dict::data * d, char * key, void * value);
   extern void * find(dict::data * d, char * key);
@@ -379,8 +396,8 @@ namespace stack {
    * size: the size of the stack
    * dt: specify how its element should be handled when the stack is deleted.
    */
-  extern stack::data * mk(size_t size);
-  extern stack::data * mk_e (enum del_policy o, size_t size);
+  extern stack::data * mk(state::data *s, size_t n);
+  extern stack::data * mk_e (state::data *s, enum del_policy o, size_t n);
 
   /*
    * return the element nth element away from the top element
@@ -417,7 +434,7 @@ namespace singleton {
     tag_t  tag;
     uintptr_t val;
   };
-  extern singleton::data * init(uintptr_t tag, void *);
+  extern singleton::data * init(void *, uintptr_t tag, uintptr_t val);
   #define CEE_SINGLETON_SIZE (sizeof(struct cee::singleton::data) + sizeof(struct cee::sect))
 
 }
@@ -456,18 +473,18 @@ namespace boxed {
     union primitive_value _;
   };
 
-  extern boxed::data * from_double(double);
-  extern boxed::data * from_float(float);
+  extern boxed::data * from_double(state::data *, double);
+  extern boxed::data * from_float(state::data *, float);
 
-  extern boxed::data * from_u64(uint64_t);
-  extern boxed::data * from_u32(uint32_t);
-  extern boxed::data * from_u16(uint16_t);
-  extern boxed::data * from_u8(uint8_t);
+  extern boxed::data * from_u64(state::data *, uint64_t);
+  extern boxed::data * from_u32(state::data *, uint32_t);
+  extern boxed::data * from_u16(state::data *, uint16_t);
+  extern boxed::data * from_u8(state::data *, uint8_t);
 
-  extern boxed::data * from_i64(int64_t);
-  extern boxed::data * from_i32(int32_t);
-  extern boxed::data * from_i16(int16_t);
-  extern boxed::data * from_i8(int8_t);
+  extern boxed::data * from_i64(state::data *, int64_t);
+  extern boxed::data * from_i32(state::data *, int32_t);
+  extern boxed::data * from_i16(state::data *, int16_t);
+  extern boxed::data * from_i8(state::data *, int8_t);
 
   extern double   to_double(boxed::data * x);
   extern float    to_float(boxed::data * x);
@@ -522,23 +539,44 @@ namespace tagged {
    * tag: any integer value
    * v: a pointer
    */
-  extern tagged::data * mk (uintptr_t tag, void * v);
-  extern tagged::data * mk_e (enum del_policy o, uintptr_t tag, void *v);
+  extern tagged::data * mk (state::data *, uintptr_t tag, void * v);
+  extern tagged::data * mk_e (state::data *, enum del_policy o, uintptr_t tag, void *v);
 }
+
+namespace env {
+  struct data {
+    env::data  * outer;
+    map::data  * vars;
+  };
+  extern env::data * mk(state::data *, env::data * outer, map::data vars);
+  extern env::data * mk_e(state::data *, enum del_policy dp[2], env::data * outer, 
+                          map::data * vars);
+};
 
 namespace closure {
   struct data {
-    void * context;
-    void * data;
-    void * fun;
+    env::data * env;
+    void (*fun)(env::data * env, size_t n, ...);
   };
+  
+  extern closure::data * mk(env::data * env, void * fun);
 };
 
 extern void use_realloc(void *);
 extern void use_malloc(void *);
-extern void del(void *);
+  
+  /*
+   * release the memory block pointed by p immediately
+   * it may follow the points-to edges to delete
+   *    the in-degree (reference count) of targeted memory blocks
+   *    or targeted memory blocks
+   *
+   */
+extern void del (void *);
 extern void del_ref(void *);
 extern void del_e (enum del_policy o, void * p);
+
+extern void trace (void *p, enum trace_action ta);
 extern int cmp (void *, void *);
 
 extern void incr_indegree (enum del_policy o, void * p);
@@ -553,6 +591,26 @@ extern uint16_t get_rc (void *);
  * call this to cause segfault for non-recoverable errors
  */
 extern void segfault() __attribute__((noreturn));
+
+namespace state {
+  struct data {
+    stack::data * stack;  // the stack
+    struct sect * trace_tail;
+    // all memory blocks are reachables from the roots
+    // are considered alive
+    set::data   * roots; 
+    // the mark value for the next iteration
+    int           next_mark;
+  };
+  /*
+   * the size of stack
+   */
+  extern state::data * mk(size_t n);
+  extern void add_gc_root(state::data *, void *);
+  extern void remove_gc_root(state::data *, void *);
+  extern void gc(state::data *);
+};
+  
 }
 #endif // CEE_H 
 #ifndef CEE_INTERNAL_H
@@ -564,13 +622,18 @@ extern void segfault() __attribute__((noreturn));
 
 #endif // CEE_INTERNAL_H
 using namespace cee;
+void cee::trace (void *p, enum trace_action ta) {
+  if (!p) cee::segfault();
+  struct sect * cs = (struct sect *)((void *)((char *)p - sizeof(struct cee::sect)));
+  cs->trace(p, ta);
+}
 /*
  * a generic resource delete function for all cee_* pointers
  */
 void cee::del(void *p) {
   if (!p) cee::segfault();
   struct sect * cs = (struct sect *)((void *)((char *)p - sizeof(struct cee::sect)));
-  cs->del(p);
+  cs->trace(p, trace_del_follow);
 }
 void cee::del_ref(void *p) {
   if (!p) cee::segfault();
@@ -580,7 +643,7 @@ void cee::del_ref(void *p) {
      it should be freed by cee_del
   */
   if (cs->retained) return;
-  if (!cs->in_degree) cs->del(p);
+  if (!cs->in_degree) cs->trace(p, trace_del_follow);
 }
 void cee::use_realloc(void * p) {
   struct sect * cs = (struct sect *)((void *)((char *)p - sizeof(struct cee::sect)));
@@ -671,23 +734,74 @@ struct _cee_boxed_header {
   struct sect cs;
   union primitive_value _[1];
 };
-static void _cee_boxed_del (void * v) {
+static struct _cee_boxed_header * _cee_boxed_resize(struct _cee_boxed_header * h, size_t n)
+{
+  struct _cee_boxed_header * ret;
+  switch(h->cs.resize_method)
+  {
+    case resize_with_realloc:
+      /* TODO: check if this block is registered as gc_root */
+     ret = (struct _cee_boxed_header *)realloc(h, n);
+      ret->cs.mem_block_size = n;
+      break;
+    case resize_with_malloc:
+     ret = (struct _cee_boxed_header *)malloc(n);
+     memcpy(ret, h, h->cs.mem_block_size);
+      ret->cs.mem_block_size = n;
+      break;
+    case resize_with_identity:
+      ret = h;
+      break;
+  }
+  return ret;
+}
+static void _cee_boxed_chain (struct _cee_boxed_header * h, state::data * st) {
+  h->cs.state = st;
+  h->cs.trace_prev = st->trace_tail;
+  st->trace_tail->trace_next = &h->cs;
+  st->trace_tail = &h->cs;
+}
+static void _cee_boxed_de_chain (struct _cee_boxed_header * h) {
+  state::data * st = h->cs.state;
+  struct sect * prev = h->cs.trace_prev;
+  struct sect * next = h->cs.trace_next;
+  if (st->trace_tail == &h->cs) {
+    prev->trace_next = NULL;
+    st->trace_tail = prev;
+  }
+  else {
+    prev->trace_next = next;
+    if (next)
+      next->trace_prev = prev;
+  }
+}
+static void _cee_boxed_trace (void * v, enum trace_action ta) {
   struct _cee_boxed_header * m = (struct _cee_boxed_header *)((void *)((char *)(v) - (__builtin_offsetof(struct _cee_boxed_header, _))));
-  free(m);
+  switch(ta) {
+    case trace_del_follow:
+    case trace_del_no_follow:
+      _cee_boxed_de_chain(m);
+      free(m);
+      break;
+    default:
+      m->cs.gc_mark = ta - trace_mark;
+      break;
+  }
 }
 static int _cee_boxed_cmp (void * v1, void * v2) {
   struct _cee_boxed_header * h1 = (struct _cee_boxed_header *)((void *)((char *)(v1) - (__builtin_offsetof(struct _cee_boxed_header, _))));
   struct _cee_boxed_header * h2 = (struct _cee_boxed_header *)((void *)((char *)(v2) - (__builtin_offsetof(struct _cee_boxed_header, _))));
-  if (h1->cs.del == h2->cs.del)
+  if (h1->cs.trace == h2->cs.trace)
     segfault();
   else
     segfault();
 }
-static struct _cee_boxed_header * _cee_boxed_mk_header(enum primitive_type t) {
+static struct _cee_boxed_header * _cee_boxed_mk_header(state::data * s, enum primitive_type t) {
   size_t mem_block_size = sizeof(struct _cee_boxed_header);
   struct _cee_boxed_header * b = (struct _cee_boxed_header *)malloc(mem_block_size);
   do{ memset(&b->cs, 0, sizeof(struct cee::sect)); } while(0);;
-  b->cs.del = _cee_boxed_del;
+  _cee_boxed_chain(b, s);
+  b->cs.trace = _cee_boxed_trace;
   b->cs.resize_method = resize_with_identity;
   b->cs.mem_block_size = mem_block_size;
   b->cs.cmp = NULL;
@@ -704,9 +818,9 @@ static int _cee_boxed_cmp_double(double v1, double v2) {
   else
     return -1;
 }
-boxed::data * from_double (double d) {
+boxed::data * from_double (state::data * s, double d) {
   size_t mem_block_size = sizeof(boxed::data);
-  struct _cee_boxed_header * b = _cee_boxed_mk_header(primitive_f64);
+  struct _cee_boxed_header * b = _cee_boxed_mk_header(s, primitive_f64);
   b->cs.cmp = (void *)_cee_boxed_cmp_double;
   b->_[0].f64 = d;
   return (boxed::data *)b->_;
@@ -719,9 +833,9 @@ static int _cee_boxed_cmp_float(float v1, float v2) {
   else
     return -1;
 }
-boxed::data * from_float (float d) {
+boxed::data * from_float (state::data * s, float d) {
   size_t mem_block_size = sizeof(boxed::data);
-  struct _cee_boxed_header * b = _cee_boxed_mk_header(primitive_f32);
+  struct _cee_boxed_header * b = _cee_boxed_mk_header(s, primitive_f32);
   b->cs.cmp = (void *)_cee_boxed_cmp_float;
   b->_[0].f32 = d;
   return (boxed::data *)b->_;
@@ -734,9 +848,9 @@ static int _cee_boxed_cmp_u64(uint64_t v1, uint64_t v2) {
   else
     return -1;
 }
-boxed::data * from_u64 (uint64_t d) {
+boxed::data * from_u64 (state::data * s, uint64_t d) {
   size_t mem_block_size = sizeof(boxed::data);
-  struct _cee_boxed_header * b = _cee_boxed_mk_header(primitive_u64);
+  struct _cee_boxed_header * b = _cee_boxed_mk_header(s, primitive_u64);
   b->_[0].u64 = d;
   return (boxed::data *)b->_;
 }
@@ -748,9 +862,9 @@ static int _cee_boxed_cmp_u32(uint32_t v1, uint32_t v2) {
   else
     return -1;
 }
-boxed::data * from_u32 (uint32_t d) {
+boxed::data * from_u32 (state::data * s, uint32_t d) {
   size_t mem_block_size = sizeof(boxed::data);
-  struct _cee_boxed_header * b = _cee_boxed_mk_header(primitive_u32);
+  struct _cee_boxed_header * b = _cee_boxed_mk_header(s, primitive_u32);
   b->cs.cmp = (void *)_cee_boxed_cmp_u32;
   b->_[0].u32 = d;
   return (boxed::data *)b->_;
@@ -763,9 +877,9 @@ static int _cee_boxed_cmp_u16(uint16_t v1, uint16_t v2) {
   else
     return -1;
 }
-boxed::data * from_u16 (uint16_t d) {
+boxed::data * from_u16 (state::data * s, uint16_t d) {
   size_t mem_block_size = sizeof(boxed::data);
-  struct _cee_boxed_header * b = _cee_boxed_mk_header(primitive_u16);
+  struct _cee_boxed_header * b = _cee_boxed_mk_header(s, primitive_u16);
   b->cs.cmp = (void *) _cee_boxed_cmp_u16;
   b->_[0].u16 = d;
   return (boxed::data *)b->_;
@@ -778,9 +892,9 @@ static int _cee_boxed_cmp_u8(uint8_t v1, uint8_t v2) {
   else
     return -1;
 }
-boxed::data * from_u8 (uint8_t d) {
+boxed::data * from_u8 (state::data * s, uint8_t d) {
   size_t mem_block_size = sizeof(boxed::data);
-  struct _cee_boxed_header * b = _cee_boxed_mk_header(primitive_u8);
+  struct _cee_boxed_header * b = _cee_boxed_mk_header(s, primitive_u8);
   b->cs.cmp = (void *)_cee_boxed_cmp_u8;
   b->_[0].u8 = d;
   return (boxed::data *)b->_;
@@ -793,9 +907,9 @@ static int _cee_boxed_cmp_i64(int64_t v1, int64_t v2) {
   else
     return -1;
 }
-boxed::data * from_i64 (int64_t d) {
+boxed::data * from_i64 (state::data *s, int64_t d) {
   size_t mem_block_size = sizeof(boxed::data);
-  struct _cee_boxed_header * b = _cee_boxed_mk_header(primitive_i64);
+  struct _cee_boxed_header * b = _cee_boxed_mk_header(s, primitive_i64);
   b->cs.cmp = (void *)_cee_boxed_cmp_i64;
   b->_[0].i64 = d;
   return (boxed::data *)b->_;
@@ -808,9 +922,9 @@ static int _cee_boxed_cmp_i32(int32_t v1, int32_t v2) {
   else
     return -1;
 }
-boxed::data * from_i32 (int32_t d) {
+boxed::data * from_i32 (state::data * s, int32_t d) {
   size_t mem_block_size = sizeof(boxed::data);
-  struct _cee_boxed_header * b = _cee_boxed_mk_header(primitive_i32);
+  struct _cee_boxed_header * b = _cee_boxed_mk_header(s, primitive_i32);
   b->cs.cmp = (void *)_cee_boxed_cmp_i32;
   b->_[0].i32 = d;
   return (boxed::data *)b->_;
@@ -823,9 +937,9 @@ static int _cee_boxed_cmp_i16(int16_t v1, int16_t v2) {
   else
     return -1;
 }
-boxed::data * from_i16 (int16_t d) {
+boxed::data * from_i16 (state::data * s, int16_t d) {
   size_t mem_block_size = sizeof(boxed::data);
-  struct _cee_boxed_header * b = _cee_boxed_mk_header(primitive_i16);
+  struct _cee_boxed_header * b = _cee_boxed_mk_header(s, primitive_i16);
   b->cs.cmp = (void *)_cee_boxed_cmp_i16;
   b->_[0].i16 = d;
   return (boxed::data *)b->_;
@@ -838,9 +952,9 @@ static int _cee_boxed_cmp_i8(int8_t v1, int8_t v2) {
   else
     return -1;
 }
-boxed::data * from_i8 (int8_t d) {
+boxed::data * from_i8 (state::data *s, int8_t d) {
   size_t mem_block_size = sizeof(boxed::data);
-  struct _cee_boxed_header * b = _cee_boxed_mk_header(primitive_i8);
+  struct _cee_boxed_header * b = _cee_boxed_mk_header(s, primitive_i8);
   b->cs.cmp = (void *)_cee_boxed_cmp_i8;
   b->_[0].i8 = d;
   return (boxed::data *)b->_;
@@ -960,19 +1074,20 @@ struct _cee_str_header {
   struct sect cs;
   char _[1];
 };
-static struct _cee_str_header * _cee_str_resize(struct _cee_str_header * h, size_t s)
+static struct _cee_str_header * _cee_str_resize(struct _cee_str_header * h, size_t n)
 {
   struct _cee_str_header * ret;
   switch(h->cs.resize_method)
   {
     case resize_with_realloc:
-     ret = (struct _cee_str_header *)realloc(h, s);
-      ret->cs.mem_block_size = s;
+      /* TODO: check if this block is registered as gc_root */
+     ret = (struct _cee_str_header *)realloc(h, n);
+      ret->cs.mem_block_size = n;
       break;
     case resize_with_malloc:
-     ret = (struct _cee_str_header *)malloc(s);
+     ret = (struct _cee_str_header *)malloc(n);
      memcpy(ret, h, h->cs.mem_block_size);
-      ret->cs.mem_block_size = s;
+      ret->cs.mem_block_size = n;
       break;
     case resize_with_identity:
       ret = h;
@@ -980,11 +1095,40 @@ static struct _cee_str_header * _cee_str_resize(struct _cee_str_header * h, size
   }
   return ret;
 }
-static void _cee_str_del (void * p) {
-  struct _cee_str_header * m = (struct _cee_str_header *)((void *)((char *)(p) - (__builtin_offsetof(struct _cee_str_header, _))));
-  free(m);
+static void _cee_str_chain (struct _cee_str_header * h, state::data * st) {
+  h->cs.state = st;
+  h->cs.trace_prev = st->trace_tail;
+  st->trace_tail->trace_next = &h->cs;
+  st->trace_tail = &h->cs;
 }
-str::data * mk (const char * fmt, ...) {
+static void _cee_str_de_chain (struct _cee_str_header * h) {
+  state::data * st = h->cs.state;
+  struct sect * prev = h->cs.trace_prev;
+  struct sect * next = h->cs.trace_next;
+  if (st->trace_tail == &h->cs) {
+    prev->trace_next = NULL;
+    st->trace_tail = prev;
+  }
+  else {
+    prev->trace_next = next;
+    if (next)
+      next->trace_prev = prev;
+  }
+}
+static void _cee_str_trace (void * p, enum trace_action ta) {
+  struct _cee_str_header * m = (struct _cee_str_header *)((void *)((char *)(p) - (__builtin_offsetof(struct _cee_str_header, _))));
+  switch (ta) {
+    case trace_del_no_follow:
+    case trace_del_follow:
+      _cee_str_de_chain(m);
+      free(m);
+      break;
+    default:
+      m->cs.gc_mark = ta - trace_mark;
+      break;
+  }
+}
+str::data * mk (state::data * st, const char * fmt, ...) {
   if (!fmt) {
     // fmt cannot be null
     // intentionally cause a segfault
@@ -1000,7 +1144,8 @@ str::data * mk (const char * fmt, ...) {
   size_t mem_block_size = s;
   struct _cee_str_header * h = (struct _cee_str_header *)malloc(mem_block_size);
   do{ memset(&h->cs, 0, sizeof(struct cee::sect)); } while(0);;
-  h->cs.del = _cee_str_del;
+  _cee_str_chain(h, st);
+  h->cs.trace = _cee_str_trace;
   h->cs.resize_method = resize_with_malloc;
   h->cs.mem_block_size = mem_block_size;
   h->cs.cmp = (void *)strcmp;
@@ -1011,7 +1156,7 @@ str::data * mk (const char * fmt, ...) {
   vsnprintf(h->_, s, fmt, ap);
   return (str::data *)(h->_);
 }
-str::data * mk_e (size_t n, const char * fmt, ...) {
+str::data * mk_e (state::data * st, size_t n, const char * fmt, ...) {
   uintptr_t s;
   va_list ap;
   if (fmt) {
@@ -1025,11 +1170,12 @@ str::data * mk_e (size_t n, const char * fmt, ...) {
   size_t mem_block_size = (s / 64 + 1) * 64;
   struct _cee_str_header * m = (struct _cee_str_header *) malloc(mem_block_size);
   do{ memset(&m->cs, 0, sizeof(struct cee::sect)); } while(0);;
-  m->cs.del = _cee_str_del;
+  m->cs.trace = _cee_str_trace;
   m->cs.resize_method = resize_with_malloc;
   m->cs.mem_block_size = mem_block_size;
   m->cs.cmp = (void *)strcmp;
   m->cs.cmp_stop_at_null = 1;
+  _cee_str_chain(m, st);
   m->capacity = mem_block_size - sizeof(struct _cee_str_header);
   if (fmt) {
     va_start(ap, fmt);
@@ -1040,10 +1186,10 @@ str::data * mk_e (size_t n, const char * fmt, ...) {
   }
   return (str::data *)(m->_);
 }
-static void _cee_str_noop(void * v) {}
+static void _cee_str_noop(void * v, enum trace_action ta) {}
 struct cee_block * cee_block_empty () {
   static struct _cee_str_header singleton;
-  singleton.cs.del = _cee_str_noop;
+  singleton.cs.trace = _cee_str_noop;
   singleton.cs.resize_method = resize_with_malloc;
   singleton.cs.mem_block_size = sizeof(struct _cee_str_header);
   singleton.capacity = 1;
@@ -1120,31 +1266,89 @@ struct _cee_dict_header {
   struct sect cs;
   struct hsearch_data _[1];
 };
-static void _cee_dict_del(void *d) {
-  struct _cee_dict_header * m = (struct _cee_dict_header *)((void *)((char *)(d) - (__builtin_offsetof(struct _cee_dict_header, _))));
-  hdestroy_r(m->_);
-  del_e(m->del_policy, m->keys);
-  del_e(m->del_policy, m->vals);
-  free(m);
+static struct _cee_dict_header * _cee_dict_resize(struct _cee_dict_header * h, size_t n)
+{
+  struct _cee_dict_header * ret;
+  switch(h->cs.resize_method)
+  {
+    case resize_with_realloc:
+      /* TODO: check if this block is registered as gc_root */
+     ret = (struct _cee_dict_header *)realloc(h, n);
+      ret->cs.mem_block_size = n;
+      break;
+    case resize_with_malloc:
+     ret = (struct _cee_dict_header *)malloc(n);
+     memcpy(ret, h, h->cs.mem_block_size);
+      ret->cs.mem_block_size = n;
+      break;
+    case resize_with_identity:
+      ret = h;
+      break;
+  }
+  return ret;
 }
-dict::data * mk_e (enum del_policy o, size_t size) {
+static void _cee_dict_chain (struct _cee_dict_header * h, state::data * st) {
+  h->cs.state = st;
+  h->cs.trace_prev = st->trace_tail;
+  st->trace_tail->trace_next = &h->cs;
+  st->trace_tail = &h->cs;
+}
+static void _cee_dict_de_chain (struct _cee_dict_header * h) {
+  state::data * st = h->cs.state;
+  struct sect * prev = h->cs.trace_prev;
+  struct sect * next = h->cs.trace_next;
+  if (st->trace_tail == &h->cs) {
+    prev->trace_next = NULL;
+    st->trace_tail = prev;
+  }
+  else {
+    prev->trace_next = next;
+    if (next)
+      next->trace_prev = prev;
+  }
+}
+static void _cee_dict_trace(void *d, enum trace_action ta) {
+  struct _cee_dict_header * m = (struct _cee_dict_header *)((void *)((char *)(d) - (__builtin_offsetof(struct _cee_dict_header, _))));
+  switch (ta) {
+    case trace_del_no_follow:
+      hdestroy_r(m->_);
+      _cee_dict_de_chain(m);
+      free(m);
+      break;
+    case trace_del_follow:
+      del_e(m->del_policy, m->keys);
+      del_e(m->del_policy, m->vals);
+      hdestroy_r(m->_);
+      _cee_dict_de_chain(m);
+      free(m);
+      break;
+    default:
+      m->cs.gc_mark = ta - trace_mark;
+      trace(m->keys, ta);
+      trace(m->vals, ta);
+      break;
+  }
+}
+dict::data * mk_e (state::data * s, enum del_policy o, size_t size) {
   size_t mem_block_size = sizeof(struct _cee_dict_header);
   struct _cee_dict_header * m = (struct _cee_dict_header *)malloc(mem_block_size);
   m->del_policy = o;
-  m->keys = list::mk(size);
+  m->keys = list::mk(s, size);
   use_realloc(m->keys);
-  m->vals = list::mk(size);
+  m->vals = list::mk(s, size);
   use_realloc(m->vals);
   m->size = size;
   do{ memset(&m->cs, 0, sizeof(struct cee::sect)); } while(0);;
-  m->cs.del = _cee_dict_del;
+  _cee_dict_chain(m, s);
+  m->cs.trace = _cee_dict_trace;
   m->cs.mem_block_size = mem_block_size;
   m->cs.resize_method = resize_with_identity;
   m->cs.n_product = 2; // key:str, value
   size_t hsize = (size_t)((float)size * 1.25);
   memset(m->_, 0, sizeof(struct hsearch_data));
-  if (hcreate_r(hsize, m->_))
+  if (hcreate_r(hsize, m->_)) {
     return (dict::data *)(m->_);
+  }
   else {
     del(m->keys);
     del(m->vals);
@@ -1152,8 +1356,8 @@ dict::data * mk_e (enum del_policy o, size_t size) {
     return NULL;
   }
 }
-dict::data * mk (size_t size) {
-  return dict::mk_e (CEE_DEFAULT_DEL_POLICY, size);
+dict::data * mk (state::data *s, size_t size) {
+  return dict::mk_e (s, CEE_DEFAULT_DEL_POLICY, size);
 }
 void add (dict::data * d, char * key, void * value) {
   struct _cee_dict_header * m = (struct _cee_dict_header *)((void *)((char *)(d) - (__builtin_offsetof(struct _cee_dict_header, _))));
@@ -1185,22 +1389,97 @@ struct _cee_map_header {
   uintptr_t size;
   enum del_policy key_del_policy;
   enum del_policy val_del_policy;
+  enum trace_action ta;
   struct sect cs;
   void * _[1];
 };
+static struct _cee_map_header * _cee_map_resize(struct _cee_map_header * h, size_t n)
+{
+  struct _cee_map_header * ret;
+  switch(h->cs.resize_method)
+  {
+    case resize_with_realloc:
+      /* TODO: check if this block is registered as gc_root */
+     ret = (struct _cee_map_header *)realloc(h, n);
+      ret->cs.mem_block_size = n;
+      break;
+    case resize_with_malloc:
+     ret = (struct _cee_map_header *)malloc(n);
+     memcpy(ret, h, h->cs.mem_block_size);
+      ret->cs.mem_block_size = n;
+      break;
+    case resize_with_identity:
+      ret = h;
+      break;
+  }
+  return ret;
+}
+static void _cee_map_chain (struct _cee_map_header * h, state::data * st) {
+  h->cs.state = st;
+  h->cs.trace_prev = st->trace_tail;
+  st->trace_tail->trace_next = &h->cs;
+  st->trace_tail = &h->cs;
+}
+static void _cee_map_de_chain (struct _cee_map_header * h) {
+  state::data * st = h->cs.state;
+  struct sect * prev = h->cs.trace_prev;
+  struct sect * next = h->cs.trace_next;
+  if (st->trace_tail == &h->cs) {
+    prev->trace_next = NULL;
+    st->trace_tail = prev;
+  }
+  else {
+    prev->trace_next = next;
+    if (next)
+      next->trace_prev = prev;
+  }
+}
 struct _cee_map_pair {
   tuple::data * value;
   struct _cee_map_header * h;
 };
-static void _cee_map_free_pair(void * c) {
+static void _cee_map_free_pair_follow(void * c) {
   struct _cee_map_pair * p = (struct _cee_map_pair *)c;
   del(p->value);
   free(p);
 }
-static void _cee_map_del(void * p) {
-  struct _cee_map_header * b = (struct _cee_map_header *)((void *)((char *)(p) - (__builtin_offsetof(struct _cee_map_header, _))));
-  tdestroy(b->_[0], _cee_map_free_pair);
-  free(b);
+static void _cee_map_free_pair_no_follow(void * c) {
+  struct _cee_map_pair * p = (struct _cee_map_pair *)c;
+  free(p);
+}
+static void _cee_map_trace_pair (const void *nodep, const VISIT which, const int depth) {
+  struct _cee_map_pair * p;
+  struct _cee_map_header * h;
+  switch (which)
+  {
+    case preorder:
+    case leaf:
+      p = (_cee_map_pair *)*(void **)nodep;
+      trace(p->value, p->h->ta);
+      break;
+    default:
+      break;
+  }
+}
+static void _cee_map_trace(void * p, enum trace_action ta) {
+  struct _cee_map_header * h = (struct _cee_map_header *)((void *)((char *)(p) - (__builtin_offsetof(struct _cee_map_header, _))));
+  switch (ta) {
+    case trace_del_no_follow:
+      tdestroy(h->_[0], _cee_map_free_pair_no_follow);
+      _cee_map_de_chain(h);
+      free(h);
+      break;
+    case trace_del_follow:
+      tdestroy(h->_[0], _cee_map_free_pair_follow);
+      _cee_map_de_chain(h);
+      free(h);
+      break;
+    default:
+      h->cs.gc_mark = ta - trace_mark;
+      h->ta = ta;
+      twalk(h->_[0], _cee_map_trace_pair);
+      break;
+  }
 }
 static int _cee_map_cmp (const void * v1, const void * v2) {
   struct _cee_map_pair * t1 = (struct _cee_map_pair *) v1;
@@ -1210,14 +1489,16 @@ static int _cee_map_cmp (const void * v1, const void * v2) {
   else
     segfault();
 }
-map::data * mk_e (enum del_policy o[2], int (*cmp)(const void *, const void *)) {
+map::data * mk_e (state::data * st, enum del_policy o[2],
+                  int (*cmp)(const void *, const void *)) {
   size_t mem_block_size = sizeof(struct _cee_map_header);
   struct _cee_map_header * m = (struct _cee_map_header *)malloc(mem_block_size);
   m->context = NULL;
   m->cmp = cmp;
   m->size = 0;
   do{ memset(&m->cs, 0, sizeof(struct cee::sect)); } while(0);;
-  m->cs.del = _cee_map_del;
+  _cee_map_chain(m, st);
+  m->cs.trace = _cee_map_trace;
   m->cs.resize_method = resize_with_identity;
   m->cs.mem_block_size = mem_block_size;
   m->cs.cmp = 0;
@@ -1228,9 +1509,9 @@ map::data * mk_e (enum del_policy o[2], int (*cmp)(const void *, const void *)) 
   m->_[0] = 0;
   return (map::data *)m->_;
 }
-map::data * mk(int (*cmp) (const void *, const void *)) {
+map::data * mk(state::data * st, int (*cmp) (const void *, const void *)) {
   static enum del_policy d[2] = { CEE_DEFAULT_DEL_POLICY, CEE_DEFAULT_DEL_POLICY };
-  return mk_e(d, cmp);
+  return mk_e(st, d, cmp);
 }
 uintptr_t size(struct map::data * m) {
   struct _cee_map_header * b = (struct _cee_map_header *)((void *)((char *)(m) - (__builtin_offsetof(struct _cee_map_header, _))));
@@ -1243,12 +1524,12 @@ void add(map::data * m, void * key, void * value) {
   enum del_policy d[2];
   d[0] = b->key_del_policy;
   d[1] = b->val_del_policy;
-  triple->value = tuple::mk_e(d, key, value);
+  triple->value = tuple::mk_e(b->cs.state, d, key, value);
   struct _cee_map_pair ** oldp = (struct _cee_map_pair **)tsearch(triple, b->_, _cee_map_cmp);
   if (oldp == NULL)
     segfault(); // run out of memory
   else if (*oldp != triple)
-    _cee_map_free_pair(triple);
+    _cee_map_free_pair_follow(triple);
   else
     b->size ++;
   return;
@@ -1274,7 +1555,7 @@ void * remove(map::data * m, void * key) {
     b->size --;
     struct _cee_map_pair * t = (struct _cee_map_pair *)*oldp;
     tuple::data * ret = t->value;
-    _cee_map_free_pair(t);
+    _cee_map_free_pair_follow(t);
     decr_indegree(b->key_del_policy, ret->_[0]);
     decr_indegree(b->val_del_policy, ret->_[1]);
     return ret->_[1];
@@ -1297,9 +1578,9 @@ static void _cee_map_get_key (const void *nodep, const VISIT which, const int de
   }
 }
 list::data * keys(map::data * m) {
-  uintptr_t s = map::size(m);
+  uintptr_t n = map::size(m);
   struct _cee_map_header * b = (struct _cee_map_header *)((void *)((char *)(m) - (__builtin_offsetof(struct _cee_map_header, _))));
-  list::data * keys = list::mk(s);
+  list::data * keys = list::mk(b->cs.state, n);
   b->context = keys;
   twalk(b->_[0], _cee_map_get_key);
   return keys;
@@ -1323,7 +1604,7 @@ static void _cee_map_get_value (const void *nodep, const VISIT which, const int 
 list::data * values(map::data * m) {
   uintptr_t s = map::size(m);
   struct _cee_map_header * b = (struct _cee_map_header *)((void *)((char *)(m) - (__builtin_offsetof(struct _cee_map_header, _))));
-  list::data * values = list::mk(s);
+  list::data * values = list::mk(b->cs.state, s);
   b->context = values;
   twalk(b->_[0], _cee_map_get_value);
   return values;
@@ -1337,28 +1618,102 @@ struct _cee_set_header {
   int (*cmp)(const void *l, const void *r);
   uintptr_t size;
   enum del_policy del_policy;
+  enum trace_action ta;
   struct sect cs;
   void * _[1];
 };
+static struct _cee_set_header * _cee_set_resize(struct _cee_set_header * h, size_t n)
+{
+  struct _cee_set_header * ret;
+  switch(h->cs.resize_method)
+  {
+    case resize_with_realloc:
+      /* TODO: check if this block is registered as gc_root */
+     ret = (struct _cee_set_header *)realloc(h, n);
+      ret->cs.mem_block_size = n;
+      break;
+    case resize_with_malloc:
+     ret = (struct _cee_set_header *)malloc(n);
+     memcpy(ret, h, h->cs.mem_block_size);
+      ret->cs.mem_block_size = n;
+      break;
+    case resize_with_identity:
+      ret = h;
+      break;
+  }
+  return ret;
+}
+static void _cee_set_chain (struct _cee_set_header * h, state::data * st) {
+  h->cs.state = st;
+  h->cs.trace_prev = st->trace_tail;
+  st->trace_tail->trace_next = &h->cs;
+  st->trace_tail = &h->cs;
+}
+static void _cee_set_de_chain (struct _cee_set_header * h) {
+  state::data * st = h->cs.state;
+  struct sect * prev = h->cs.trace_prev;
+  struct sect * next = h->cs.trace_next;
+  if (st->trace_tail == &h->cs) {
+    prev->trace_next = NULL;
+    st->trace_tail = prev;
+  }
+  else {
+    prev->trace_next = next;
+    if (next)
+      next->trace_prev = prev;
+  }
+}
 struct _cee_set_pair {
   void * value;
   struct _cee_set_header * h;
 };
-static void _cee_set_free_pair (void * c) {
-  struct _cee_set_header * h = ((struct _cee_set_pair *)c)->h;
-  del_e(h->del_policy, ((struct _cee_set_pair *)c)->value);
+static void _cee_set_free_pair_no_follow (void * c) {
   free(c);
 }
-static void _cee_set_del(void * p) {
+static void _cee_set_free_pair_follow (void * c) {
+  struct _cee_set_pair * p = (struct _cee_set_pair *)c;
+  del_e(p->h->del_policy, p->value);
+  free(c);
+}
+static void _cee_set_trace_pair (const void *nodep, const VISIT which, const int depth) {
+  struct _cee_set_pair * p;
+  struct _cee_set_header * h;
+  switch (which)
+  {
+    case preorder:
+    case leaf:
+      p = (_cee_set_pair *)*(void **)nodep;
+      trace(p->value, p->h->ta);
+      break;
+    default:
+      break;
+  }
+}
+static void _cee_set_trace(void * p, enum trace_action ta) {
   struct _cee_set_header * h = (struct _cee_set_header *)((void *)((char *)(p) - (__builtin_offsetof(struct _cee_set_header, _))));
-  tdestroy(h->_[0], _cee_set_free_pair);
-  free(h);
+  switch (ta) {
+    case trace_del_no_follow:
+      tdestroy(h->_[0], _cee_set_free_pair_no_follow);
+      _cee_set_de_chain(h);
+      free(h);
+      break;
+    case trace_del_follow:
+      tdestroy(h->_[0], _cee_set_free_pair_follow);
+      _cee_set_de_chain(h);
+      free(h);
+      break;
+    default:
+      h->cs.gc_mark = ta - trace_mark;
+      h->ta = ta;
+      twalk(h->_[0], _cee_set_trace_pair);
+      break;
+  }
 }
 static int _cee_set_cmp (const void * v1, const void * v2) {
   struct _cee_set_pair * t1 = (struct _cee_set_pair *) v1;
   struct _cee_set_pair * t2 = (struct _cee_set_pair *) v2;
   if (t1->h == t2->h)
-   return t1->h->cmp(t1->value, t2->value);
+    return t1->h->cmp(t1->value, t2->value);
   else
     segfault();
 }
@@ -1367,13 +1722,15 @@ static int _cee_set_cmp (const void * v1, const void * v2) {
  * its two elements are decided by cmp
  * dt: specify how its elements should be handled if the set is deleted.
  */
-set::data * mk_e (enum del_policy o, int (*cmp)(const void *, const void *))
+set::data * mk_e (state::data * st, enum del_policy o,
+                  int (*cmp)(const void *, const void *))
 {
   struct _cee_set_header * m = (struct _cee_set_header *)malloc(sizeof(struct _cee_set_header));
   m->cmp = cmp;
   m->size = 0;
   do{ memset(&m->cs, 0, sizeof(struct cee::sect)); } while(0);;
-  m->cs.del = _cee_set_del;
+  _cee_set_chain(m, st);
+  m->cs.trace = _cee_set_trace;
   m->cs.resize_method = resize_with_identity;
   m->cs.n_product = 1;
   m->context = NULL;
@@ -1381,8 +1738,8 @@ set::data * mk_e (enum del_policy o, int (*cmp)(const void *, const void *))
   m->del_policy = o;
   return (set::data *)m->_;
 }
-set::data * mk (int (*cmp)(const void *, const void *)) {
-  return set::mk_e(CEE_DEFAULT_DEL_POLICY, cmp);
+set::data * mk (state::data * s, int (*cmp)(const void *, const void *)) {
+  return set::mk_e(s, CEE_DEFAULT_DEL_POLICY, cmp);
 }
 size_t size (set::data * s) {
   struct _cee_set_header * h = (struct _cee_set_header *)((void *)((char *)(s) - (__builtin_offsetof(struct _cee_set_header, _))));
@@ -1398,13 +1755,13 @@ bool empty (set::data * s) {
  */
 void add(set::data *m, void * val) {
   struct _cee_set_header * h = (struct _cee_set_header *)((void *)((char *)(m) - (__builtin_offsetof(struct _cee_set_header, _))));
-  void ** c = (void **)malloc(sizeof(void *) * 2);
-  c[0] = val;
-  c[1] = h;
+  struct _cee_set_pair * c = (struct _cee_set_pair *)malloc(sizeof(struct _cee_set_pair));
+  c->value = val;
+  c->h = h;
   void *** oldp = (void ***) tsearch(c, h->_, _cee_set_cmp);
   if (oldp == NULL)
     segfault();
-  else if (*oldp != c)
+  else if (*oldp != (void **)c)
     free(c);
   else {
     h->size ++;
@@ -1458,7 +1815,7 @@ static void _cee_set_get_value (const void *nodep, const VISIT which, const int 
 list::data * values(set::data * m) {
   uintptr_t s = set::size(m);
   struct _cee_set_header * h = (struct _cee_set_header *)((void *)((char *)(m) - (__builtin_offsetof(struct _cee_set_header, _))));
-  h->context = list::mk(s);
+  h->context = list::mk(h->cs.state, s);
   use_realloc(h->context);
   twalk(h->_[0], _cee_set_get_value);
   return (list::data *)h->context;
@@ -1476,11 +1833,11 @@ void * remove(set::data *m, void * key) {
     return k;
   }
 }
-set::data * union_set (set::data * s1, set::data * s2) {
+set::data * union_set (state::data * s, set::data * s1, set::data * s2) {
   struct _cee_set_header * h1 = (struct _cee_set_header *)((void *)((char *)(s1) - (__builtin_offsetof(struct _cee_set_header, _))));
   struct _cee_set_header * h2 = (struct _cee_set_header *)((void *)((char *)(s2) - (__builtin_offsetof(struct _cee_set_header, _))));
   if (h1->cmp == h2->cmp) {
-    set::data * s0 = set::mk(h1->cmp);
+    set::data * s0 = set::mk(s, h1->cmp);
     list::data * v1 = set::values(s1);
     list::data * v2 = set::values(s2);
     int i;
@@ -1507,14 +1864,69 @@ struct _cee_stack_header {
   struct sect cs;
   void * _[];
 };
-static void _cee_stack_del (void * v) {
+static struct _cee_stack_header * _cee_stack_resize(struct _cee_stack_header * h, size_t n)
+{
+  struct _cee_stack_header * ret;
+  switch(h->cs.resize_method)
+  {
+    case resize_with_realloc:
+      /* TODO: check if this block is registered as gc_root */
+     ret = (struct _cee_stack_header *)realloc(h, n);
+      ret->cs.mem_block_size = n;
+      break;
+    case resize_with_malloc:
+     ret = (struct _cee_stack_header *)malloc(n);
+     memcpy(ret, h, h->cs.mem_block_size);
+      ret->cs.mem_block_size = n;
+      break;
+    case resize_with_identity:
+      ret = h;
+      break;
+  }
+  return ret;
+}
+static void _cee_stack_chain (struct _cee_stack_header * h, state::data * st) {
+  h->cs.state = st;
+  h->cs.trace_prev = st->trace_tail;
+  st->trace_tail->trace_next = &h->cs;
+  st->trace_tail = &h->cs;
+}
+static void _cee_stack_de_chain (struct _cee_stack_header * h) {
+  state::data * st = h->cs.state;
+  struct sect * prev = h->cs.trace_prev;
+  struct sect * next = h->cs.trace_next;
+  if (st->trace_tail == &h->cs) {
+    prev->trace_next = NULL;
+    st->trace_tail = prev;
+  }
+  else {
+    prev->trace_next = next;
+    if (next)
+      next->trace_prev = prev;
+  }
+}
+static void _cee_stack_trace (void * v, enum trace_action ta) {
   struct _cee_stack_header * m = (struct _cee_stack_header *)((void *)((char *)(v) - (__builtin_offsetof(struct _cee_stack_header, _))));
   int i;
-  for (i = 0; i < m->used; i++)
-    del_e(m->del_policy, m->_[i]);
-  free(m);
+  switch (ta) {
+    case trace_del_no_follow:
+      _cee_stack_de_chain(m);
+      free(m);
+      break;
+    case trace_del_follow:
+      for (i = 0; i < m->used; i++)
+        del_e(m->del_policy, m->_[i]);
+      _cee_stack_de_chain(m);
+      free(m);
+      break;
+    default:
+      m->cs.gc_mark = ta - trace_mark;
+      for (i = 0; i < m->used; i++)
+        trace(m->_[i], ta);
+      break;
+  }
 }
-stack::data * mk_e (enum del_policy o, size_t size) {
+stack::data * mk_e (state::data * st, enum del_policy o, size_t size) {
   uintptr_t mem_block_size = sizeof(struct _cee_stack_header) + size * sizeof(void *);
   struct _cee_stack_header * m = (struct _cee_stack_header *)malloc(mem_block_size);
   m->capacity = size;
@@ -1522,12 +1934,13 @@ stack::data * mk_e (enum del_policy o, size_t size) {
   m->top = (0-1);
   m->del_policy = o;
   do{ memset(&m->cs, 0, sizeof(struct cee::sect)); } while(0);;
-  m->cs.del = _cee_stack_del;
+  _cee_stack_chain(m, st);
+  m->cs.trace = _cee_stack_trace;
   m->cs.mem_block_size = mem_block_size;
   return (stack::data *)(m->_);
 }
-stack::data * mk (size_t size) {
-  return mk_e(CEE_DEFAULT_DEL_POLICY, size);
+stack::data * mk (state::data * st, size_t size) {
+  return mk_e(st, CEE_DEFAULT_DEL_POLICY, size);
 }
 int push (stack::data * v, void *e) {
   struct _cee_stack_header * m = (struct _cee_stack_header *)((void *)((char *)((void **)v) - (__builtin_offsetof(struct _cee_stack_header, _))));
@@ -1590,20 +2003,77 @@ struct _cee_tuple_header {
   struct sect cs;
   void * _[2];
 };
-static void _cee_tuple_del(void * v) {
+static struct _cee_tuple_header * _cee_tuple_resize(struct _cee_tuple_header * h, size_t n)
+{
+  struct _cee_tuple_header * ret;
+  switch(h->cs.resize_method)
+  {
+    case resize_with_realloc:
+      /* TODO: check if this block is registered as gc_root */
+     ret = (struct _cee_tuple_header *)realloc(h, n);
+      ret->cs.mem_block_size = n;
+      break;
+    case resize_with_malloc:
+     ret = (struct _cee_tuple_header *)malloc(n);
+     memcpy(ret, h, h->cs.mem_block_size);
+      ret->cs.mem_block_size = n;
+      break;
+    case resize_with_identity:
+      ret = h;
+      break;
+  }
+  return ret;
+}
+static void _cee_tuple_chain (struct _cee_tuple_header * h, state::data * st) {
+  h->cs.state = st;
+  h->cs.trace_prev = st->trace_tail;
+  st->trace_tail->trace_next = &h->cs;
+  st->trace_tail = &h->cs;
+}
+static void _cee_tuple_de_chain (struct _cee_tuple_header * h) {
+  state::data * st = h->cs.state;
+  struct sect * prev = h->cs.trace_prev;
+  struct sect * next = h->cs.trace_next;
+  if (st->trace_tail == &h->cs) {
+    prev->trace_next = NULL;
+    st->trace_tail = prev;
+  }
+  else {
+    prev->trace_next = next;
+    if (next)
+      next->trace_prev = prev;
+  }
+}
+static void _cee_tuple_trace(void * v, enum trace_action ta) {
   struct _cee_tuple_header * b = (struct _cee_tuple_header *)((void *)((char *)(v) - (__builtin_offsetof(struct _cee_tuple_header, _))));
   int i;
-  for (i = 0; i < 2; i++)
-    del_e(b->del_policies[i], b->_[i]);
-  free(b);
+  switch (ta) {
+    case trace_del_no_follow:
+      _cee_tuple_de_chain(b);
+      free(b);
+      break;
+    case trace_del_follow:
+      for (i = 0; i < 2; i++)
+        del_e(b->del_policies[i], b->_[i]);
+      _cee_tuple_de_chain(b);
+      free(b);
+      break;
+    default:
+      b->cs.gc_mark = ta - trace_mark;
+      for (i = 0; i < 2; i++)
+        trace(b->_[i], ta);
+      break;
+  }
 }
-tuple::data * mk_e (enum del_policy o[2], void * v1, void * v2) {
+tuple::data * mk_e (state::data * st, enum del_policy o[2], void * v1, void * v2) {
   size_t mem_block_size = sizeof(struct _cee_tuple_header);
   struct _cee_tuple_header * m = (struct _cee_tuple_header *) malloc(mem_block_size);
   do{ memset(&m->cs, 0, sizeof(struct cee::sect)); } while(0);;
-  m->cs.del = _cee_tuple_del;
+  _cee_tuple_chain(m, st);
+  m->cs.trace = _cee_tuple_trace;
   m->cs.resize_method = resize_with_identity;
   m->cs.mem_block_size = mem_block_size;
+  m->cs.state = st;
   m->_[0] = v1;
   m->_[1] = v2;
   int i;
@@ -1613,10 +2083,9 @@ tuple::data * mk_e (enum del_policy o[2], void * v1, void * v2) {
   }
   return (tuple::data *)&m->_;
 }
-tuple::data * mk (void * v1, void * v2) {
-  static enum del_policy o[2] = { CEE_DEFAULT_DEL_POLICY,
-                                 CEE_DEFAULT_DEL_POLICY };
-  return mk_e(o, v1, v2);
+tuple::data * mk (state::data * st, void * v1, void * v2) {
+  static enum del_policy o[2] = { CEE_DEFAULT_DEL_POLICY, CEE_DEFAULT_DEL_POLICY };
+  return mk_e(st, o, v1, v2);
 }
   }
 }
@@ -1627,20 +2096,77 @@ struct _cee_triple_header {
   struct sect cs;
   void * _[3];
 };
-static void _cee_triple_del(void * v) {
+static struct _cee_triple_header * _cee_triple_resize(struct _cee_triple_header * h, size_t n)
+{
+  struct _cee_triple_header * ret;
+  switch(h->cs.resize_method)
+  {
+    case resize_with_realloc:
+      /* TODO: check if this block is registered as gc_root */
+     ret = (struct _cee_triple_header *)realloc(h, n);
+      ret->cs.mem_block_size = n;
+      break;
+    case resize_with_malloc:
+     ret = (struct _cee_triple_header *)malloc(n);
+     memcpy(ret, h, h->cs.mem_block_size);
+      ret->cs.mem_block_size = n;
+      break;
+    case resize_with_identity:
+      ret = h;
+      break;
+  }
+  return ret;
+}
+static void _cee_triple_chain (struct _cee_triple_header * h, state::data * st) {
+  h->cs.state = st;
+  h->cs.trace_prev = st->trace_tail;
+  st->trace_tail->trace_next = &h->cs;
+  st->trace_tail = &h->cs;
+}
+static void _cee_triple_de_chain (struct _cee_triple_header * h) {
+  state::data * st = h->cs.state;
+  struct sect * prev = h->cs.trace_prev;
+  struct sect * next = h->cs.trace_next;
+  if (st->trace_tail == &h->cs) {
+    prev->trace_next = NULL;
+    st->trace_tail = prev;
+  }
+  else {
+    prev->trace_next = next;
+    if (next)
+      next->trace_prev = prev;
+  }
+}
+static void _cee_triple_trace(void * v, enum trace_action ta) {
   struct _cee_triple_header * b = (struct _cee_triple_header *)((void *)((char *)(v) - (__builtin_offsetof(struct _cee_triple_header, _))));
   int i;
-  for (i = 0; i < 3; i++)
-    del_e(b->del_policies[i], b->_[i]);
-  free(b);
+  switch (ta) {
+    case trace_del_no_follow:
+      _cee_triple_de_chain(b);
+      free(b);
+      break;
+    case trace_del_follow:
+      for (i = 0; i < 3; i++)
+        del_e(b->del_policies[i], b->_[i]);
+      _cee_triple_de_chain(b);
+      free(b);
+      break;
+    default:
+      b->cs.gc_mark = ta - trace_mark;
+      for (i = 0; i < 3; i++)
+        trace(b->_[i], ta);
+      break;
+  }
 }
-triple::data * mk_e (enum del_policy o[3], void * v1, void * v2, void * v3) {
+triple::data * mk_e (state::data * st, enum del_policy o[3], void * v1, void * v2, void * v3) {
   size_t mem_block_size = sizeof(struct _cee_triple_header);
   struct _cee_triple_header * m = (struct _cee_triple_header *)malloc(mem_block_size);
   do{ memset(&m->cs, 0, sizeof(struct cee::sect)); } while(0);;
-  m->cs.del = _cee_triple_del;
+  _cee_triple_chain(m, st);
+  m->cs.trace = _cee_triple_trace;
   m->cs.resize_method = resize_with_identity;
   m->cs.mem_block_size = mem_block_size;
+  m->cs.state = st;
   m->_[0] = v1;
   m->_[1] = v2;
   m->_[2] = v3;
@@ -1651,11 +2177,11 @@ triple::data * mk_e (enum del_policy o[3], void * v1, void * v2, void * v3) {
   }
   return (triple::data *)&m->_;
 }
-triple::data * mk (void * v1, void * v2, void *v3) {
+triple::data * mk (state::data * st, void * v1, void * v2, void *v3) {
   static enum del_policy o[3] = { CEE_DEFAULT_DEL_POLICY,
                                  CEE_DEFAULT_DEL_POLICY,
                                  CEE_DEFAULT_DEL_POLICY };
-  return mk_e(o, v1, v2, v3);
+  return mk_e(st, o, v1, v2, v3);
 }
   }
 }
@@ -1666,22 +2192,79 @@ struct _cee_quadruple_header {
   struct sect cs;
   void * _[4];
 };
-static void _cee_quadruple_del(void * v) {
+static struct _cee_quadruple_header * _cee_quadruple_resize(struct _cee_quadruple_header * h, size_t n)
+{
+  struct _cee_quadruple_header * ret;
+  switch(h->cs.resize_method)
+  {
+    case resize_with_realloc:
+      /* TODO: check if this block is registered as gc_root */
+     ret = (struct _cee_quadruple_header *)realloc(h, n);
+      ret->cs.mem_block_size = n;
+      break;
+    case resize_with_malloc:
+     ret = (struct _cee_quadruple_header *)malloc(n);
+     memcpy(ret, h, h->cs.mem_block_size);
+      ret->cs.mem_block_size = n;
+      break;
+    case resize_with_identity:
+      ret = h;
+      break;
+  }
+  return ret;
+}
+static void _cee_quadruple_chain (struct _cee_quadruple_header * h, state::data * st) {
+  h->cs.state = st;
+  h->cs.trace_prev = st->trace_tail;
+  st->trace_tail->trace_next = &h->cs;
+  st->trace_tail = &h->cs;
+}
+static void _cee_quadruple_de_chain (struct _cee_quadruple_header * h) {
+  state::data * st = h->cs.state;
+  struct sect * prev = h->cs.trace_prev;
+  struct sect * next = h->cs.trace_next;
+  if (st->trace_tail == &h->cs) {
+    prev->trace_next = NULL;
+    st->trace_tail = prev;
+  }
+  else {
+    prev->trace_next = next;
+    if (next)
+      next->trace_prev = prev;
+  }
+}
+static void _cee_quadruple_trace(void * v, enum trace_action ta) {
   struct _cee_quadruple_header * b = (struct _cee_quadruple_header *)((void *)((char *)(v) - (__builtin_offsetof(struct _cee_quadruple_header, _))));
   int i;
-  for (i = 0; i < 4; i++)
-    del_e(b->del_policies[i], b->_[i]);
-  free(b);
+  switch (ta) {
+    case trace_del_no_follow:
+      _cee_quadruple_de_chain(b);
+      free(b);
+      break;
+    case trace_del_follow:
+      for (i = 0; i < 4; i++)
+        del_e(b->del_policies[i], b->_[i]);
+      _cee_quadruple_de_chain(b);
+      free(b);
+      break;
+    default:
+      b->cs.gc_mark = ta - trace_mark;
+      for (i = 0; i < 4; i++)
+        trace(b->_[i], ta);
+      break;
+  }
 }
-quadruple::data * mk_e (enum del_policy o[4], void * v1, void * v2, void * v3,
-                        void * v4) {
+quadruple::data * mk_e (state::data * st, enum del_policy o[4],
+                        void * v1, void * v2, void * v3, void * v4) {
   size_t mem_block_size = sizeof(struct _cee_quadruple_header);
   struct _cee_quadruple_header * m = (struct _cee_quadruple_header *) malloc(mem_block_size);
   do{ memset(&m->cs, 0, sizeof(struct cee::sect)); } while(0);;
-  m->cs.del = _cee_quadruple_del;
+  _cee_quadruple_chain(m, st);
+  m->cs.trace = _cee_quadruple_trace;
   m->cs.resize_method = resize_with_identity;
   m->cs.mem_block_size = mem_block_size;
   m->cs.n_product = 4;
+  m->cs.state = st;
   m->_[0] = v1;
   m->_[1] = v2;
   m->_[2] = v3;
@@ -1704,19 +2287,20 @@ struct _cee_list_header {
   struct sect cs;
   void * _[];
 };
-static struct _cee_list_header * _cee_list_resize(struct _cee_list_header * h, size_t s)
+static struct _cee_list_header * _cee_list_resize(struct _cee_list_header * h, size_t n)
 {
   struct _cee_list_header * ret;
   switch(h->cs.resize_method)
   {
     case resize_with_realloc:
-     ret = (struct _cee_list_header *)realloc(h, s);
-      ret->cs.mem_block_size = s;
+      /* TODO: check if this block is registered as gc_root */
+     ret = (struct _cee_list_header *)realloc(h, n);
+      ret->cs.mem_block_size = n;
       break;
     case resize_with_malloc:
-     ret = (struct _cee_list_header *)malloc(s);
+     ret = (struct _cee_list_header *)malloc(n);
      memcpy(ret, h, h->cs.mem_block_size);
-      ret->cs.mem_block_size = s;
+      ret->cs.mem_block_size = n;
       break;
     case resize_with_identity:
       ret = h;
@@ -1724,34 +2308,65 @@ static struct _cee_list_header * _cee_list_resize(struct _cee_list_header * h, s
   }
   return ret;
 }
-static void _cee_list_del (void * v) {
+static void _cee_list_chain (struct _cee_list_header * h, state::data * st) {
+  h->cs.state = st;
+  h->cs.trace_prev = st->trace_tail;
+  st->trace_tail->trace_next = &h->cs;
+  st->trace_tail = &h->cs;
+}
+static void _cee_list_de_chain (struct _cee_list_header * h) {
+  state::data * st = h->cs.state;
+  struct sect * prev = h->cs.trace_prev;
+  struct sect * next = h->cs.trace_next;
+  if (st->trace_tail == &h->cs) {
+    prev->trace_next = NULL;
+    st->trace_tail = prev;
+  }
+  else {
+    prev->trace_next = next;
+    if (next)
+      next->trace_prev = prev;
+  }
+}
+static void _cee_list_trace (void * v, enum trace_action ta) {
   struct _cee_list_header * m = (struct _cee_list_header *)((void *)((char *)(v) - (__builtin_offsetof(struct _cee_list_header, _))));
   int i;
-  for (i = 0; i < m->size; i++)
-    del_e(m->del_policy, m->_[i]);
-  free(m);
+  switch(ta) {
+    case trace_del_no_follow:
+      _cee_list_de_chain(m);
+      free(m);
+      break;
+    case trace_del_follow:
+      for (i = 0; i < m->size; i++)
+        del_e(m->del_policy, m->_[i]);
+      _cee_list_de_chain(m);
+      free(m);
+      break;
+    default:
+      m->cs.gc_mark = ta - trace_mark;
+      for (i = 0; i < m->size; i++)
+        trace(m->_[i], ta);
+      break;
+  }
 }
-list::data * mk_e (enum del_policy o, size_t cap) {
+list::data * mk_e (state::data * st, enum del_policy o, size_t cap) {
   size_t mem_block_size = sizeof(struct _cee_list_header) + cap * sizeof(void *);
   struct _cee_list_header * m = (struct _cee_list_header *)malloc(mem_block_size);
   m->capacity = cap;
   m->size = 0;
   m->del_policy = o;
   do{ memset(&m->cs, 0, sizeof(struct cee::sect)); } while(0);;
-  m->cs.del = _cee_list_del;
+  _cee_list_chain(m, st);
+  m->cs.trace = _cee_list_trace;
   m->cs.resize_method = resize_with_malloc;
   m->cs.mem_block_size = mem_block_size;
   return (list::data *)(m->_);
 }
-list::data * mk (size_t cap) {
-  return mk_e(CEE_DEFAULT_DEL_POLICY, cap);
+list::data * mk (state::data * s, size_t cap) {
+  return mk_e(s, CEE_DEFAULT_DEL_POLICY, cap);
 }
 list::data * append (list::data ** l, void *e) {
   list::data * v = *l;
-  if (v == NULL) {
-    v = mk(10);
-    use_realloc(v);
-  }
   struct _cee_list_header * m = (struct _cee_list_header *)((void *)((char *)(v) - (__builtin_offsetof(struct _cee_list_header, _))));
   size_t capacity = m->capacity;
   size_t extra_cap = capacity ? capacity : 1;
@@ -1759,18 +2374,18 @@ list::data * append (list::data ** l, void *e) {
     size_t new_mem_block_size = m->cs.mem_block_size + extra_cap * sizeof(void *);
     struct _cee_list_header * m1 = _cee_list_resize(m, new_mem_block_size);
     m1->capacity = capacity + extra_cap;
+    *l = (list::data *)m1->_;
     m = m1;
   }
   m->_[m->size] = e;
   m->size ++;
   incr_indegree(m->del_policy, e);
-  *l = (list::data *)m->_;
   return *l;
 }
-list::data * insert(list::data ** l, size_t index, void *e) {
+list::data * insert(state::data * s, list::data ** l, size_t index, void *e) {
   list::data * v = *l;
   if (v == NULL) {
-    v = mk(10);
+    v = mk(s, 10);
     use_realloc(v);
   }
   struct _cee_list_header * m = (struct _cee_list_header *)((void *)((char *)(v) - (__builtin_offsetof(struct _cee_list_header, _))));
@@ -1780,6 +2395,7 @@ list::data * insert(list::data ** l, size_t index, void *e) {
     size_t new_mem_block_size = m->cs.mem_block_size + extra_cap * sizeof(void *);
     struct _cee_list_header * m1 = _cee_list_resize(m, new_mem_block_size);
     m1->capacity = capacity + extra_cap;
+    *l = (list::data *)m1->_;
     m = m1;
   }
   int i;
@@ -1788,7 +2404,6 @@ list::data * insert(list::data ** l, size_t index, void *e) {
   m->_[index] = e;
   m->size ++;
   incr_indegree(m->del_policy, e);
-  *l = (list::data *)m->_;
   return *l;
 }
 bool remove(list::data * v, size_t index) {
@@ -1820,16 +2435,71 @@ struct _cee_tagged_header {
   struct sect cs;
   struct tagged::data _;
 };
-static void _cee_tagged_del (void * v) {
-  struct _cee_tagged_header * m = (struct _cee_tagged_header *)((void *)((char *)(v) - (__builtin_offsetof(struct _cee_tagged_header, _))));
-  del_e(m->del_policy, m->_.ptr._);
-  free(m);
+static struct _cee_tagged_header * _cee_tagged_resize(struct _cee_tagged_header * h, size_t n)
+{
+  struct _cee_tagged_header * ret;
+  switch(h->cs.resize_method)
+  {
+    case resize_with_realloc:
+      /* TODO: check if this block is registered as gc_root */
+     ret = (struct _cee_tagged_header *)realloc(h, n);
+      ret->cs.mem_block_size = n;
+      break;
+    case resize_with_malloc:
+     ret = (struct _cee_tagged_header *)malloc(n);
+     memcpy(ret, h, h->cs.mem_block_size);
+      ret->cs.mem_block_size = n;
+      break;
+    case resize_with_identity:
+      ret = h;
+      break;
+  }
+  return ret;
 }
-tagged::data * mk_e (enum del_policy o, uintptr_t tag, void *p) {
+static void _cee_tagged_chain (struct _cee_tagged_header * h, state::data * st) {
+  h->cs.state = st;
+  h->cs.trace_prev = st->trace_tail;
+  st->trace_tail->trace_next = &h->cs;
+  st->trace_tail = &h->cs;
+}
+static void _cee_tagged_de_chain (struct _cee_tagged_header * h) {
+  state::data * st = h->cs.state;
+  struct sect * prev = h->cs.trace_prev;
+  struct sect * next = h->cs.trace_next;
+  if (st->trace_tail == &h->cs) {
+    prev->trace_next = NULL;
+    st->trace_tail = prev;
+  }
+  else {
+    prev->trace_next = next;
+    if (next)
+      next->trace_prev = prev;
+  }
+}
+static void _cee_tagged_trace (void * v, enum trace_action ta) {
+  struct _cee_tagged_header * m = (struct _cee_tagged_header *)((void *)((char *)(v) - (__builtin_offsetof(struct _cee_tagged_header, _))));
+  switch (ta) {
+    case trace_del_no_follow:
+      _cee_tagged_de_chain(m);
+      free(m);
+      break;
+    case trace_del_follow:
+      del_e(m->del_policy, m->_.ptr._);
+      _cee_tagged_de_chain(m);
+      free(m);
+      break;
+    default:
+      m->cs.gc_mark = ta - trace_mark;
+      trace(m->_.ptr._, ta);
+      break;
+  }
+}
+tagged::data * mk_e (state::data * st, enum del_policy o, uintptr_t tag, void *p) {
   size_t mem_block_size = sizeof(struct _cee_tagged_header);
   struct _cee_tagged_header * b = (struct _cee_tagged_header *)malloc(mem_block_size);
   do{ memset(&b->cs, 0, sizeof(struct cee::sect)); } while(0);;
-  b->cs.del = _cee_tagged_del;
+  _cee_tagged_chain(b, st);
+  b->cs.trace = _cee_tagged_trace;
   b->cs.resize_method = resize_with_identity;
   b->cs.mem_block_size = mem_block_size;
   b->_.tag = tag;
@@ -1838,8 +2508,8 @@ tagged::data * mk_e (enum del_policy o, uintptr_t tag, void *p) {
   incr_indegree(o, p);
   return &b->_;
 }
-tagged::data * mk (uintptr_t tag, void *p) {
-  return mk_e(CEE_DEFAULT_DEL_POLICY, tag, p);
+tagged::data * mk (state::data * st, uintptr_t tag, void *p) {
+  return mk_e(st, CEE_DEFAULT_DEL_POLICY, tag, p);
 }
   }
 }
@@ -1853,47 +2523,96 @@ struct _cee_singleton_header {
 /*
  * singleton should never be deleted, hence we pass a noop
  */
-static void _cee_singleton_noop(void *p) {}
+static void _cee_singleton_noop(void *p, enum trace_action ta) {}
 /*
  * the parameter of this function has to be a global/static 
  * uintptr_t array of two elements
  */
-singleton::data * init(uintptr_t tag, void *s) {
+singleton::data * init(void *s, uintptr_t tag, uintptr_t val) {
   struct _cee_singleton_header * b = (struct _cee_singleton_header *)s;
   do{ memset(&b->cs, 0, sizeof(struct cee::sect)); } while(0);;
-  b->cs.del = _cee_singleton_noop;
+  b->cs.trace = _cee_singleton_noop;
   b->cs.resize_method = resize_with_identity;
   b->cs.mem_block_size = 0;
   b->cs.n_product = 0;
   b->_ = tag;
-  b->val = 0;
+  b->val = val;
   return (singleton::data *)&(b->_);
 }
   }
 }
 namespace cee {
-namespace closure {
+  namespace closure {
 struct _cee_closure_header {
   struct sect cs;
   struct data _;
 };
-static void _cee_closure_del (void * v) {
-  struct _cee_closure_header * m = (struct _cee_closure_header *)((void *)((char *)(v) - (__builtin_offsetof(struct _cee_closure_header, _))));
-  free(m);
+static struct _cee_closure_header * _cee_closure_resize(struct _cee_closure_header * h, size_t n)
+{
+  struct _cee_closure_header * ret;
+  switch(h->cs.resize_method)
+  {
+    case resize_with_realloc:
+      /* TODO: check if this block is registered as gc_root */
+     ret = (struct _cee_closure_header *)realloc(h, n);
+      ret->cs.mem_block_size = n;
+      break;
+    case resize_with_malloc:
+     ret = (struct _cee_closure_header *)malloc(n);
+     memcpy(ret, h, h->cs.mem_block_size);
+      ret->cs.mem_block_size = n;
+      break;
+    case resize_with_identity:
+      ret = h;
+      break;
+  }
+  return ret;
 }
-struct data * mk (void * context, void * data, void * fun) {
+static void _cee_closure_chain (struct _cee_closure_header * h, state::data * st) {
+  h->cs.state = st;
+  h->cs.trace_prev = st->trace_tail;
+  st->trace_tail->trace_next = &h->cs;
+  st->trace_tail = &h->cs;
+}
+static void _cee_closure_de_chain (struct _cee_closure_header * h) {
+  state::data * st = h->cs.state;
+  struct sect * prev = h->cs.trace_prev;
+  struct sect * next = h->cs.trace_next;
+  if (st->trace_tail == &h->cs) {
+    prev->trace_next = NULL;
+    st->trace_tail = prev;
+  }
+  else {
+    prev->trace_next = next;
+    if (next)
+      next->trace_prev = prev;
+  }
+}
+static void _cee_closure_trace (void * v, enum trace_action sa) {
+  struct _cee_closure_header * m = (struct _cee_closure_header *)((void *)((char *)(v) - (__builtin_offsetof(struct _cee_closure_header, _))));
+  switch (sa) {
+    case trace_del_no_follow:
+    case trace_del_follow:
+      _cee_closure_de_chain(m);
+      free(m);
+      break;
+    default:
+      break;
+  }
+}
+struct data * mk (state::data * s, env::data * env, void * fun) {
   size_t mem_block_size = sizeof(struct _cee_closure_header);
   struct _cee_closure_header * b = (struct _cee_closure_header *)malloc(mem_block_size);
   do{ memset(&b->cs, 0, sizeof(struct cee::sect)); } while(0);;
-  b->cs.del = _cee_closure_del;
+  _cee_closure_chain(b, s);
+  b->cs.trace = _cee_closure_trace;
   b->cs.resize_method = resize_with_identity;
   b->cs.mem_block_size = mem_block_size;
-  b->_.context = context;
-  b->_.data = data;
-  b->_.fun = fun;
+  b->_.env = NULL;
+  b->_.fun = NULL;
   return &(b->_);
 }
-} // namespace closure
+  } // namespace closure
 } // namespace cee
 namespace cee {
   namespace block {
@@ -1903,19 +2622,20 @@ struct _cee_block_header {
   struct sect cs;
   char _[1]; // actual data
 };
-static struct _cee_block_header * _cee_block_resize(struct _cee_block_header * h, size_t s)
+static struct _cee_block_header * _cee_block_resize(struct _cee_block_header * h, size_t n)
 {
   struct _cee_block_header * ret;
   switch(h->cs.resize_method)
   {
     case resize_with_realloc:
-     ret = (struct _cee_block_header *)realloc(h, s);
-      ret->cs.mem_block_size = s;
+      /* TODO: check if this block is registered as gc_root */
+     ret = (struct _cee_block_header *)realloc(h, n);
+      ret->cs.mem_block_size = n;
       break;
     case resize_with_malloc:
-     ret = (struct _cee_block_header *)malloc(s);
+     ret = (struct _cee_block_header *)malloc(n);
      memcpy(ret, h, h->cs.mem_block_size);
-      ret->cs.mem_block_size = s;
+      ret->cs.mem_block_size = n;
       break;
     case resize_with_identity:
       ret = h;
@@ -1923,18 +2643,50 @@ static struct _cee_block_header * _cee_block_resize(struct _cee_block_header * h
   }
   return ret;
 }
-static void _cee_block_del (void * p) {
-  struct _cee_block_header * m = (struct _cee_block_header *)(struct _cee_block_header *)((void *)((char *)(p) - (__builtin_offsetof(struct _cee_block_header, _))));
-  free(m);
+static void _cee_block_chain (struct _cee_block_header * h, state::data * st) {
+  h->cs.state = st;
+  h->cs.trace_prev = st->trace_tail;
+  st->trace_tail->trace_next = &h->cs;
+  st->trace_tail = &h->cs;
 }
-void * mk (size_t n) {
+static void _cee_block_de_chain (struct _cee_block_header * h) {
+  state::data * st = h->cs.state;
+  struct sect * prev = h->cs.trace_prev;
+  struct sect * next = h->cs.trace_next;
+  if (st->trace_tail == &h->cs) {
+    prev->trace_next = NULL;
+    st->trace_tail = prev;
+  }
+  else {
+    prev->trace_next = next;
+    if (next)
+      next->trace_prev = prev;
+  }
+}
+static void _cee_block_trace (void * p, enum trace_action ta) {
+  struct _cee_block_header * m = (struct _cee_block_header *)(struct _cee_block_header *)((void *)((char *)(p) - (__builtin_offsetof(struct _cee_block_header, _))));
+  switch (ta) {
+    case trace_del_follow:
+    case trace_del_no_follow:
+      _cee_block_de_chain(m);
+      free(m);
+      break;
+    default:
+      m->cs.gc_mark = ta - trace_mark;
+      break;
+  }
+}
+static void _cee_block_mark (void * p) {
+};
+void * mk (state::data * s, size_t n) {
   size_t mem_block_size;
   va_list ap;
   mem_block_size = n + sizeof(struct _cee_block_header);
   struct _cee_block_header * m = (struct _cee_block_header *)malloc(mem_block_size);
   do{ memset(&m->cs, 0, sizeof(struct cee::sect)); } while(0);;
   m->del_policy = dp_del_rc;
-  m->cs.del = _cee_block_del;
+  _cee_block_chain(m, s);
+  m->cs.trace = _cee_block_trace;
   m->cs.resize_method = resize_with_malloc;
   m->cs.mem_block_size = mem_block_size;
   m->cs.cmp = (void *)memcmp;
@@ -1950,21 +2702,77 @@ struct _cee_n_tuple_header {
   struct sect cs;
   void * _[16];
 };
-static void _cee_n_tuple_del(void * v) {
+static struct _cee_n_tuple_header * _cee_n_tuple_resize(struct _cee_n_tuple_header * h, size_t n)
+{
+  struct _cee_n_tuple_header * ret;
+  switch(h->cs.resize_method)
+  {
+    case resize_with_realloc:
+      /* TODO: check if this block is registered as gc_root */
+     ret = (struct _cee_n_tuple_header *)realloc(h, n);
+      ret->cs.mem_block_size = n;
+      break;
+    case resize_with_malloc:
+     ret = (struct _cee_n_tuple_header *)malloc(n);
+     memcpy(ret, h, h->cs.mem_block_size);
+      ret->cs.mem_block_size = n;
+      break;
+    case resize_with_identity:
+      ret = h;
+      break;
+  }
+  return ret;
+}
+static void _cee_n_tuple_chain (struct _cee_n_tuple_header * h, state::data * st) {
+  h->cs.state = st;
+  h->cs.trace_prev = st->trace_tail;
+  st->trace_tail->trace_next = &h->cs;
+  st->trace_tail = &h->cs;
+}
+static void _cee_n_tuple_de_chain (struct _cee_n_tuple_header * h) {
+  state::data * st = h->cs.state;
+  struct sect * prev = h->cs.trace_prev;
+  struct sect * next = h->cs.trace_next;
+  if (st->trace_tail == &h->cs) {
+    prev->trace_next = NULL;
+    st->trace_tail = prev;
+  }
+  else {
+    prev->trace_next = next;
+    if (next)
+      next->trace_prev = prev;
+  }
+}
+static void _cee_n_tuple_trace(void * v, enum trace_action ta) {
   struct _cee_n_tuple_header * b = (struct _cee_n_tuple_header *)((void *)((char *)(v) - (__builtin_offsetof(struct _cee_n_tuple_header, _))));
   int i;
-  for (i = 0; i < b->cs.n_product; i++)
-    del_e(b->del_policies[i], b->_[i]);
-  free(b);
+  switch (ta) {
+    case trace_del_no_follow:
+      _cee_n_tuple_de_chain(b);
+      free(b);
+      break;
+    case trace_del_follow:
+      for (i = 0; i < b->cs.n_product; i++)
+        del_e(b->del_policies[i], b->_[i]);
+      _cee_n_tuple_de_chain(b);
+      free(b);
+      break;
+    default:
+      b->cs.gc_mark = ta - trace_mark;
+      for (i = 0; i < b->cs.n_product; i++)
+        trace(b->_[i], ta);
+      break;
+  }
 }
-static struct _cee_n_tuple_header * cee_n_tuple_v (size_t ntuple,
+static struct _cee_n_tuple_header * cee_n_tuple_v (state::data * st, size_t ntuple,
                                          enum del_policy o[], va_list ap) {
   if (ntuple > 16)
     segfault();
   size_t mem_block_size = sizeof(struct _cee_n_tuple_header);
   struct _cee_n_tuple_header * m = (struct _cee_n_tuple_header *) malloc(mem_block_size);
   do{ memset(&m->cs, 0, sizeof(struct cee::sect)); } while(0);;
-  m->cs.del = _cee_n_tuple_del;
+  _cee_n_tuple_chain(m, st);
+  m->cs.trace = _cee_n_tuple_trace;
   m->cs.resize_method = resize_with_identity;
   m->cs.mem_block_size = mem_block_size;
   m->cs.n_product = ntuple;
@@ -1976,16 +2784,193 @@ static struct _cee_n_tuple_header * cee_n_tuple_v (size_t ntuple,
   }
   return m;
 }
-n_tuple::data * mk (size_t ntuple, ...) {
+n_tuple::data * mk (state::data * st, size_t ntuple, ...) {
   va_list ap;
   va_start(ap, ntuple);
   enum del_policy * o = (enum del_policy *)malloc(ntuple * sizeof (enum del_policy));
   int i;
   for (i = 0; i < ntuple; i++)
     o[i] = CEE_DEFAULT_DEL_POLICY;
-  struct _cee_n_tuple_header * h = cee_n_tuple_v(ntuple, o, ap);
+  struct _cee_n_tuple_header * h = cee_n_tuple_v(st, ntuple, o, ap);
   free(o);
   return (n_tuple::data *)(h->_);
+}
+  }
+}
+namespace cee {
+  namespace env {
+struct _cee_env_header {
+  enum del_policy env_dp;
+  enum del_policy vars_dp;
+  struct sect cs;
+  struct data _;
+};
+static struct _cee_env_header * _cee_env_resize(struct _cee_env_header * h, size_t n)
+{
+  struct _cee_env_header * ret;
+  switch(h->cs.resize_method)
+  {
+    case resize_with_realloc:
+      /* TODO: check if this block is registered as gc_root */
+     ret = (struct _cee_env_header *)realloc(h, n);
+      ret->cs.mem_block_size = n;
+      break;
+    case resize_with_malloc:
+     ret = (struct _cee_env_header *)malloc(n);
+     memcpy(ret, h, h->cs.mem_block_size);
+      ret->cs.mem_block_size = n;
+      break;
+    case resize_with_identity:
+      ret = h;
+      break;
+  }
+  return ret;
+}
+static void _cee_env_chain (struct _cee_env_header * h, state::data * st) {
+  h->cs.state = st;
+  h->cs.trace_prev = st->trace_tail;
+  st->trace_tail->trace_next = &h->cs;
+  st->trace_tail = &h->cs;
+}
+static void _cee_env_de_chain (struct _cee_env_header * h) {
+  state::data * st = h->cs.state;
+  struct sect * prev = h->cs.trace_prev;
+  struct sect * next = h->cs.trace_next;
+  if (st->trace_tail == &h->cs) {
+    prev->trace_next = NULL;
+    st->trace_tail = prev;
+  }
+  else {
+    prev->trace_next = next;
+    if (next)
+      next->trace_prev = prev;
+  }
+}
+static void _cee_env_trace (void * v, enum trace_action ta) {
+  struct _cee_env_header * h = (struct _cee_env_header *)((void *)((char *)(v) - (__builtin_offsetof(struct _cee_env_header, _))));
+  switch (ta) {
+    case trace_del_no_follow:
+      _cee_env_de_chain(h);
+      free(h);
+      break;
+    case trace_del_follow:
+      del_e(h->env_dp, h->_.outer);
+      del_e(h->vars_dp, h->_.vars);
+      _cee_env_de_chain(h);
+      free(h);
+      break;
+    default:
+      h->cs.gc_mark = ta - trace_mark;
+      trace(h->_.outer, ta);
+      trace(h->_.vars, ta);
+      break;
+  }
+}
+env::data * mk_e(state::data * st, enum del_policy dp[2], env::data * outer, map::data * vars) {
+  size_t mem_block_size = sizeof(struct _cee_env_header);
+  struct _cee_env_header * h = (struct _cee_env_header *)malloc(mem_block_size);
+  do{ memset(&h->cs, 0, sizeof(struct cee::sect)); } while(0);;
+  _cee_env_chain(h, st);
+  h->cs.trace = _cee_env_trace;
+  h->cs.resize_method = resize_with_identity;
+  h->cs.mem_block_size = mem_block_size;
+  h->cs.cmp = NULL;
+  h->cs.n_product = 0;
+  h->env_dp = dp[0];
+  h->vars_dp = dp[1];
+  h->_.outer = outer;
+  h->_.vars = vars;
+  return &h->_;
+}
+env::data * mk(state::data * st, env::data * outer, map::data * vars) {
+  enum del_policy dp[2] = { CEE_DEFAULT_DEL_POLICY, CEE_DEFAULT_DEL_POLICY };
+  return mk_e (st, dp, outer, vars);
+}
+  } // env
+} // cee
+namespace cee {
+namespace state {
+struct _cee_state_header {
+  struct sect cs;
+  struct data _;
+};
+static void _cee_state_trace (void * v, enum trace_action ta) {
+  struct _cee_state_header * m = (struct _cee_state_header *)((void *)((char *)(v) - (__builtin_offsetof(struct _cee_state_header, _))));
+  switch (ta) {
+    case trace_del_follow:
+    {
+      // following this tracing chain but not the relations
+      struct sect * tail = m->_.trace_tail;
+      while (tail != &m->cs) {
+        trace(tail + 1, trace_del_no_follow);
+        tail = m->_.trace_tail;
+      }
+      free(m);
+      break;
+    }
+    case trace_del_no_follow:
+    {
+      // TODO detach the this state from all memory blocks
+      free(m);
+      break;
+    }
+    default:
+    {
+      m->cs.gc_mark = ta - trace_mark;
+      trace(m->_.roots, ta);
+      trace(m->_.stack, ta);
+      break;
+    }
+  }
+}
+static void _cee_state_sweep (void * v, enum trace_action ta) {
+  struct _cee_state_header * m = (struct _cee_state_header *)((void *)((char *)(v) - (__builtin_offsetof(struct _cee_state_header, _))));
+  struct sect * head = &m->cs;
+  while (head != NULL) {
+    struct sect * next = head->trace_next;
+    if (head->gc_mark != ta - trace_mark)
+      trace(head + 1, trace_del_no_follow);
+    head = next;
+  }
+}
+static int _cee_state_cmp (const void * v1, const void * v2) {
+  intptr_t u1 = (intptr_t) v1;
+  intptr_t u2 = (intptr_t) v2;
+  if (u1 > u2)
+    return -1;
+  else if (u1 == u2)
+    return 0;
+  else
+    return -1;
+}
+state::data * mk(size_t n) {
+  size_t memblock_size = sizeof(struct _cee_state_header);
+  struct _cee_state_header * h = (struct _cee_state_header *)malloc(memblock_size);
+  do{ memset(&h->cs, 0, sizeof(struct cee::sect)); } while(0);;
+  h->cs.trace = _cee_state_trace;
+  h->_.trace_tail = &h->cs; // points to self;
+  set::data * roots = set::mk_e(&h->_, dp_noop, _cee_state_cmp);
+  h->_.roots = roots;
+  h->_.next_mark = 1;
+  h->_.stack = stack::mk(&h->_, n);
+  return &h->_;
+}
+void add_gc_root(state::data * s, void * key) {
+  set::add(s->roots, key);
+}
+void remove_gc_root(state::data * s, void * key) {
+  set::remove(s->roots, key);
+}
+void gc (state::data * s) {
+  struct _cee_state_header * h = (struct _cee_state_header *)((void *)((char *)(s) - (__builtin_offsetof(struct _cee_state_header, _))));
+  int mark = trace_mark + s->next_mark;
+  trace(s, (enum trace_action)mark);
+  _cee_state_sweep(s, (enum trace_action) mark);
+  if (s->next_mark == 0) {
+    s->next_mark = 1;
+  } else {
+    s->next_mark = 0;
+  }
 }
   }
 }

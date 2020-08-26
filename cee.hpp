@@ -10,15 +10,23 @@
 #include <stdbool.h>
 
 namespace cee {
+  namespace state { struct data; };
+  
 typedef uintptr_t tag_t;
 typedef int (*cmp_fun) (const void *, const void *);
 
 enum resize_method {
   resize_with_identity = 0, // resize with identity function
-  resize_with_malloc = 1,
-  resize_with_realloc = 2
+  resize_with_malloc = 1,   // resize with malloc  (safe, but leak)
+  resize_with_realloc = 2   // resize with realloc (probably unsafe)
 };
 
+
+enum trace_action {
+  trace_del_no_follow = 0,
+  trace_del_follow, // trace points-to graph and delete each node
+  trace_mark,       // trace points-to graph and mark each node
+};
 
 /*
  * a cotainer is an instance of struct cee_*
@@ -63,14 +71,18 @@ enum del_policy {
  *
  */
 struct sect {
-  uint8_t cmp_stop_at_null:1; // 0: compare all bytes, otherwise stop at '\0'
-  uint8_t resize_method:2;    // three values: identity, malloc, realloc
-  uint8_t retained:1;         // if it is retained, in_degree is ignored
-  uint8_t n_product;          // n-ary (no more than 256) product type
-  uint16_t in_degree;         // the number of cee objects points to this object
-  uintptr_t mem_block_size;   // the size of a memory block enclosing this struct
-  void *cmp;                  // compare two memory blocks
-  void (*del)(void *);        // the object specific delete function
+  uint8_t  cmp_stop_at_null:1;    // 0: compare all bytes, otherwise stop at '\0'
+  uint8_t  resize_method:2;       // three values: identity, malloc, realloc
+  uint8_t  retained:1;            // if it is retained, in_degree is ignored
+  uint8_t  gc_mark:2;             // used for mark & sweep gc
+  uint8_t  n_product;             // n-ary (no more than 256) product type
+  uint16_t in_degree;             // the number of cee objects points to this object
+  state::data * state;            // the gc state under which this block is allocated
+  struct sect * trace_next;       // used for chaining cee::_::data to be traced
+  struct sect * trace_prev;       // used for chaining cee::_::data to be traced
+  uintptr_t mem_block_size;       // the size of a memory block enclosing this struct
+  void *cmp;                      // compare two memory blocks
+  void (*trace)(void *, enum trace_action);// the object specific scan function
 };
 
 
@@ -92,7 +104,7 @@ namespace block {
    * return: the address of the first byte in consecutive bytes, the address 
    *         can be freed by cee_del
    */
-  extern void * mk (size_t n);
+  extern void * mk (state::data * s, size_t n);
 };
 
   
@@ -127,7 +139,7 @@ namespace str {
    *      cee_str ("%d", 10);
    *
    */
-  extern str::data  * mk (const char * fmt, ...);
+  extern str::data  * mk (state::data *s, const char * fmt, ...);
 
 
   /*
@@ -148,7 +160,7 @@ namespace str {
    *      cee_str_n(100, "%d", 10);
    *
    */
-  extern str::data  * mk_e (size_t n, const char * fmt, ...);
+  extern str::data  * mk_e (state::data * s, size_t n, const char * fmt, ...);
 
   /*
    * return the pointer of the null terminator;
@@ -187,12 +199,12 @@ namespace list {
    * when the list is deleted, its elements will be handled by 
    * the default deletion policy
    */
-  extern list::data * mk (size_t capacity);
+  extern list::data * mk (state::data * s, size_t capacity);
 
   /*
    *
    */
-  extern list::data * mk_e (enum del_policy o, size_t size);
+  extern list::data * mk_e (state::data * s, enum del_policy o, size_t size);
 
   /*
    * it may return a new list if the parameter list is too small
@@ -207,7 +219,7 @@ namespace list {
   extern list::data * insert(list::data ** v, size_t index, void * e);
 
   /*
-   * it removes an element at index and shift the rest elements 
+   * it removes an element at index and shift the rest elements
    * to lower indices
    */
   extern bool remove(list::data * v, size_t index);
@@ -235,8 +247,9 @@ namespace tuple {
    * v1: the first value of the tuple
    * v2: the second value of the tuple
    */
-  extern tuple::data * mk (void * v1, void * v2);
-  extern tuple::data * mk_e (enum del_policy o[2], void * v1, void * v2);
+  extern tuple::data * mk (state::data * s, void * v1, void * v2);
+  extern tuple::data * mk_e (state::data * s, 
+                             enum del_policy o[2], void * v1, void * v2);
 }
 
 namespace triple {
@@ -251,8 +264,9 @@ namespace triple {
    * v3: the third value of the triple
    * when the triple is deleted, its elements will not be deleted
    */
-  extern triple::data * mk(void * v1, void * v2, void * v3);
-  extern triple::data * mk_e(enum del_policy o[3], void * v1, void * v2, void * v3);
+  extern triple::data * mk(state::data * s, void * v1, void * v2, void * v3);
+  extern triple::data * mk_e(state::data * s, 
+                             enum del_policy o[3], void * v1, void * v2, void * v3);
 };
 
   
@@ -269,17 +283,20 @@ namespace quadruple {
    * v4: the fourth value of the quadruple
    * when the quadruple is deleted, its elements will not be deleted
    */
-  extern quadruple::data * mk(void * v1, void * v2, void * v3, void * v4);
+  extern quadruple::data * mk(state::data * s, 
+                              void * v1, void * v2, void * v3, void * v4);
 
-  extern quadruple::data * mk_e(enum del_policy o[4], void * v1, void * v2, void *v3, void *v4);
+  extern quadruple::data * mk_e(state::data * s, 
+                                enum del_policy o[4], void * v1, void * v2, 
+                                void *v3, void *v4);
 }
 
 namespace n_tuple {
   struct data {
     void * _[1];  // n elements
   };
-  extern n_tuple::data * mk (size_t n, ...);
-  extern n_tuple::data * mk_e (size_t n, enum del_policy o[], ...);
+  extern n_tuple::data * mk (state::data * s, size_t n, ...);
+  extern n_tuple::data * mk_e (state::data * s, size_t n, enum del_policy o[], ...);
 };
 
 
@@ -299,8 +316,8 @@ namespace set {
    * dt: specifiy how its element should be handled when the set is deleted.
    *
    */
-  extern set::data * mk (int (*cmp)(const void *, const void *));
-  extern set::data * mk_e (enum del_policy o, 
+  extern set::data * mk (state::data * s, int (*cmp)(const void *, const void *));
+  extern set::data * mk_e (state::data *s, enum del_policy o, 
                            int (*cmp)(const void *, const void *));
 
   extern void add(set::data * m, void * key);
@@ -322,8 +339,8 @@ namespace map {
    * map implementation based on binary tree
    * add/remove
    */
-  extern map::data * mk(cmp_fun cmp);
-  extern map::data * mk_e(enum del_policy o[2], cmp_fun cmp);
+  extern map::data * mk(state::data * s, cmp_fun cmp);
+  extern map::data * mk_e(state::data * s, enum del_policy o[2], cmp_fun cmp);
 
   extern uintptr_t size(map::data *);
   extern void add(map::data * m, void * key, void * value);
@@ -350,8 +367,8 @@ namespace dict {
   /*
    *
    */
-  extern dict::data * mk (size_t s);
-  extern dict::data * mk_e (enum del_policy o, size_t s);
+  extern dict::data * mk (state::data * s, size_t n);
+  extern dict::data * mk_e (state::data * s, enum del_policy o, size_t n);
 
   extern void add(dict::data * d, char * key, void * value);
   extern void * find(dict::data * d, char * key);
@@ -369,8 +386,8 @@ namespace stack {
    * size: the size of the stack
    * dt: specify how its element should be handled when the stack is deleted.
    */
-  extern stack::data * mk(size_t size);
-  extern stack::data * mk_e (enum del_policy o, size_t size);
+  extern stack::data * mk(state::data *s, size_t n);
+  extern stack::data * mk_e (state::data *s, enum del_policy o, size_t n);
 
   /*
    * return the element nth element away from the top element
@@ -407,7 +424,7 @@ namespace singleton {
     tag_t  tag;
     uintptr_t val;
   };
-  extern singleton::data * init(uintptr_t tag, void *);
+  extern singleton::data * init(void *, uintptr_t tag, uintptr_t val);
   #define CEE_SINGLETON_SIZE (sizeof(struct cee::singleton::data) + sizeof(struct cee::sect))
 
 }
@@ -446,18 +463,18 @@ namespace boxed {
     union primitive_value _;
   };
 
-  extern boxed::data * from_double(double);
-  extern boxed::data * from_float(float);
+  extern boxed::data * from_double(state::data *, double);
+  extern boxed::data * from_float(state::data *, float);
 
-  extern boxed::data * from_u64(uint64_t);
-  extern boxed::data * from_u32(uint32_t);
-  extern boxed::data * from_u16(uint16_t);
-  extern boxed::data * from_u8(uint8_t);
+  extern boxed::data * from_u64(state::data *, uint64_t);
+  extern boxed::data * from_u32(state::data *, uint32_t);
+  extern boxed::data * from_u16(state::data *, uint16_t);
+  extern boxed::data * from_u8(state::data *, uint8_t);
 
-  extern boxed::data * from_i64(int64_t);
-  extern boxed::data * from_i32(int32_t);
-  extern boxed::data * from_i16(int16_t);
-  extern boxed::data * from_i8(int8_t);
+  extern boxed::data * from_i64(state::data *, int64_t);
+  extern boxed::data * from_i32(state::data *, int32_t);
+  extern boxed::data * from_i16(state::data *, int16_t);
+  extern boxed::data * from_i8(state::data *, int8_t);
 
   extern double   to_double(boxed::data * x);
   extern float    to_float(boxed::data * x);
@@ -512,23 +529,44 @@ namespace tagged {
    * tag: any integer value
    * v: a pointer
    */
-  extern tagged::data * mk (uintptr_t tag, void * v);
-  extern tagged::data * mk_e (enum del_policy o, uintptr_t tag, void *v);
+  extern tagged::data * mk (state::data *, uintptr_t tag, void * v);
+  extern tagged::data * mk_e (state::data *, enum del_policy o, uintptr_t tag, void *v);
 }
+
+namespace env {
+  struct data {
+    env::data  * outer;
+    map::data  * vars;
+  };
+  extern env::data * mk(state::data *, env::data * outer, map::data vars);
+  extern env::data * mk_e(state::data *, enum del_policy dp[2], env::data * outer, 
+                          map::data * vars);
+};
 
 namespace closure {
   struct data {
-    void * context;
-    void * data;
-    void * fun;
+    env::data * env;
+    void (*fun)(env::data * env, size_t n, ...);
   };
+  
+  extern closure::data * mk(env::data * env, void * fun);
 };
 
 extern void use_realloc(void *);
 extern void use_malloc(void *);
-extern void del(void *);
+  
+  /*
+   * release the memory block pointed by p immediately
+   * it may follow the points-to edges to delete
+   *    the in-degree (reference count) of targeted memory blocks
+   *    or targeted memory blocks
+   *
+   */
+extern void del (void *);
 extern void del_ref(void *);
 extern void del_e (enum del_policy o, void * p);
+
+extern void trace (void *p, enum trace_action ta);
 extern int cmp (void *, void *);
 
 extern void incr_indegree (enum del_policy o, void * p);
@@ -543,5 +581,25 @@ extern uint16_t get_rc (void *);
  * call this to cause segfault for non-recoverable errors
  */
 extern void segfault() __attribute__((noreturn));
+
+namespace state {
+  struct data {
+    stack::data * stack;  // the stack
+    struct sect * trace_tail;
+    // all memory blocks are reachables from the roots
+    // are considered alive
+    set::data   * roots; 
+    // the mark value for the next iteration
+    int           next_mark;
+  };
+  /*
+   * the size of stack
+   */
+  extern state::data * mk(size_t n);
+  extern void add_gc_root(state::data *, void *);
+  extern void remove_gc_root(state::data *, void *);
+  extern void gc(state::data *);
+};
+  
 }
 #endif // CEE_H

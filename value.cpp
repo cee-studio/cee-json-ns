@@ -12,31 +12,31 @@
 namespace cee {
   namespace json {
 
-json::data * mk_true () {
+json::data * mk_true (state::data *st) {
   static char b[CEE_SINGLETON_SIZE];
-  return (data *) singleton::init ((uintptr_t)type_is_boolean, b);
+  return (data *) singleton::init (b, (uintptr_t)type_is_boolean, 1);
 }
 
-json::data * mk_false () {
+json::data * mk_false (state::data *st) {
   static char b[CEE_SINGLETON_SIZE];
-  return (data *) singleton::init ((uintptr_t)type_is_boolean, b);
+  return (data *) singleton::init (b, (uintptr_t)type_is_boolean, 0);
 }
 
-json::data * mk_bool(bool b) {
+json::data * mk_bool(state::data * st, bool b) {
   if (b)
-    return mk_true();
+    return mk_true(st);
   else
-    return mk_false();
+    return mk_false(st);
 }
 
-json::data * mk_undefined () {
+json::data * mk_undefined (state::data * st) {
   static char b[CEE_SINGLETON_SIZE];
-  return (data *) singleton::init ((uintptr_t)type_is_undefined, b);
+  return (data *) singleton::init (b, (uintptr_t)type_is_undefined, 0);
 }
 
-json::data * mk_null () {
+json::data * mk_null (state::data *st) {
   static char b[CEE_SINGLETON_SIZE];
-  return (data *) singleton::init ((uintptr_t)type_is_null, b);
+  return (data *) singleton::init (b, (uintptr_t)type_is_null, 0);
 }
 
 map::data * to_object (json::data * p) {
@@ -68,64 +68,75 @@ boxed::data * to_number (json::data * p) {
 }
 
 bool to_bool (json::data * p) {
-  if (p == mk_true())
-    return true;
-  else if (p == mk_false())
-    return false;
-  
+  switch(p->t) {
+    case type_is_null:
+    case type_is_undefined:
+      return false;
+    case type_is_boolean:
+      {
+        singleton::data * d = (singleton::data *)p;
+        if (d->val)
+          return true;
+        else
+          return false;
+      }
+    default:
+      segfault();
+      break;
+  }
   segfault();
   return false;
 }
 
-json::data * mk_number (double d) {
-  boxed::data *p = boxed::from_double (d);
-  tagged::data * t = tagged::mk (type_is_number, p);
+json::data * mk_number (state::data * st, double d) {
+  boxed::data *p = boxed::from_double (st, d);
+  tagged::data * t = tagged::mk (st, type_is_number, p);
   return (data *)t;
 }
 
-json::data * mk_string(str::data *s) {
-  tagged::data * t = tagged::mk(type_is_string, s);
+json::data * mk_string(state::data *st, str::data *s) {
+  tagged::data * t = tagged::mk(st, type_is_string, s);
   return (data *)t;
 }
 
-json::data * mk_array(int s) {
-  list::data * v = list::mk(s);
-  tagged::data * t = tagged::mk(type_is_array, v);
+json::data * mk_array(state::data * st, int s) {
+  list::data * v = list::mk(st, s);
+  tagged::data * t = tagged::mk(st, type_is_array, v);
   return (data *)t;
 }
     
-json::data * mk_object() {
-  map::data * m = map::mk ((cmp_fun)strcmp);
-  tagged::data * t = tagged::mk(type_is_object, m);
+json::data * mk_object(state::data * st) {
+  map::data * m = map::mk (st, (cmp_fun)strcmp);
+  tagged::data * t = tagged::mk(st, type_is_object, m);
   return (data *)t;
 }
 
-void object_set(json::data * j, char * key, json::data * v) {
+void object_set(state::data * st, json::data * j, char * key, json::data * v) {
   map::data * o = to_object(j);
   if (!o) 
     segfault();
-  map::add(o, str::mk("%s", key), v);
+  map::add(o, str::mk(st, "%s", key), v);
 }
 
-void object_set_bool(json::data * j, char * key, bool b) {
+void object_set_bool(state::data * st, json::data * j, char * key, bool b) {
   map::data * o = to_object(j);
   if (!o) 
     segfault();
-  map::add(o, str::mk("%s", key), mk_bool(b));
+  map::add(o, str::mk(st, "%s", key), mk_bool(st, b));
 }
 
-void object_set_string (json::data * j, char * key, char * str) {
+void object_set_string (state::data * st, json::data * j, char * key, char * str) {
   map::data * o = to_object(j);
   if (!o) 
     segfault();
-  map::add(o, str::mk("%s", key), mk_string(str::mk("%s", str)));
+  map::add(o, str::mk(st, "%s", key), mk_string(st, str::mk(st, "%s", str)));
 }
 
-void object_set_number (json::data * j, char * key, double real) {
+void object_set_number (state::data * st, json::data * j, char * key, double real) {
   map::data * o = to_object(j);
   if (!o) 
     segfault();
-  map::add(o, str::mk("%s", key), mk_number(real));
+  map::add(o, str::mk(st, "%s", key), mk_number(st, real));
 }
 
 void array_append (json::data * j, json::data *v) {
@@ -135,24 +146,25 @@ void array_append (json::data * j, json::data *v) {
   list::append(&o, v);
 }
 
-void array_append_bool (json::data * j, bool b) {
+void array_append_bool (state::data * st, json::data * j, bool b) {
   list::data * o = to_array(j);
   if (!o) 
     segfault();
-  list::append(&o, mk_bool(b));
+  list::append(&o, mk_bool(st, b));
 }
 
-void array_append_string (json::data * j, char * x) {
+void array_append_string (state::data * st, json::data * j, char * x) {
   list::data * o = to_array(j);
   if (!o) 
     segfault();
-  list::append(&o, mk_string(str::mk("%s", x)));
+  list::append(&o, mk_string(st, str::mk(st, "%s", x)));
 }
 
 /*
  * this function assume the file pointer points to the begin of a file
  */
-json::data * load_from_file (FILE * f, bool force_eof, int * error_at_line) {
+json::data * load_from_file (state::data * st, FILE * f, bool force_eof, 
+                             int * error_at_line) {
   int fd = fileno(f);
   struct stat buf;
   fstat(fd, &buf);
@@ -163,16 +175,16 @@ json::data * load_from_file (FILE * f, bool force_eof, int * error_at_line) {
   
   int line = 0;
   json::data * j;
-  if (!parse(b, size, &j, true, &line)) {
+  if (!parse(st, b, size, &j, true, &line)) {
     // report error
   }
   return j;
 }
 
-bool save(json::data * j, FILE *f, enum format how) {
-  size_t s = json::snprint(NULL, 0, j, how);
+bool save(state::data * st, json::data * j, FILE *f, enum format how) {
+  size_t s = json::snprint(st, NULL, 0, j, how);
   char * p = (char *)malloc(s+1);
-  snprint(p, s+1, j, how);
+  snprint(st, p, s+1, j, how);
   if (fwrite(p, s+1, 1, f) != 1) {
     fprintf(stderr, "%s", strerror(errno));
     return false;
