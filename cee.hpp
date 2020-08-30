@@ -1,10 +1,5 @@
 #ifndef CEE_H
 #define CEE_H
-
-#ifndef _GNU_SOURCE
-#define _GNU_SOURCE
-#endif
-#include <search.h>
 #include <stdint.h>
 #include <stddef.h>
 #include <stdbool.h>
@@ -77,12 +72,17 @@ struct sect {
   uint8_t  gc_mark:2;             // used for mark & sweep gc
   uint8_t  n_product;             // n-ary (no more than 256) product type
   uint16_t in_degree;             // the number of cee objects points to this object
+  // begin of gc fields
   state::data * state;            // the gc state under which this block is allocated
   struct sect * trace_next;       // used for chaining cee::_::data to be traced
   struct sect * trace_prev;       // used for chaining cee::_::data to be traced
+  // end of gc fields
   uintptr_t mem_block_size;       // the size of a memory block enclosing this struct
   void *cmp;                      // compare two memory blocks
-  void (*trace)(void *, enum trace_action);// the object specific scan function
+  
+  // the object specific generic scan function
+  // it does memory deallocation, reference count decreasing, or liveness marking
+  void (*trace)(void *, enum trace_action);
 };
 
 
@@ -361,7 +361,7 @@ namespace dict {
    *
    */
   struct data {
-    struct hsearch_data _;
+    char _[1];  // opaque data
   };
 
   /*
@@ -584,6 +584,8 @@ extern void segfault() __attribute__((noreturn));
 
 namespace state {
   struct data {
+    // arbitrary number of contexts
+    map::data * contexts;
     stack::data * stack;  // the stack
     struct sect * trace_tail;
     // all memory blocks are reachables from the roots
@@ -599,7 +601,10 @@ namespace state {
   extern void add_gc_root(state::data *, void *);
   extern void remove_gc_root(state::data *, void *);
   extern void gc(state::data *);
+  extern void add_context(state::data *, char * key, void * val);
+  extern void remove_context(state::data *, char * key);
+  extern void * get_context(state::data *, char * key);
 };
   
 }
-#endif // CEE_H
+#endif
